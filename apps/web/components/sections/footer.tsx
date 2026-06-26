@@ -39,15 +39,20 @@ export const Footer = () => (
     <div className="mx-auto max-w-6xl px-6 py-16">
       <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
         <div>
-          <p className="font-medium text-foreground">sbox SDK</p>
-          <p className="mt-2 max-w-[28ch] text-sm text-muted-foreground">
+          <p className="flex items-center gap-2 font-display text-base font-semibold text-foreground">
+            <span className="size-1.5 rounded-full bg-native" />
+            sbox SDK
+          </p>
+          <p className="mt-3 max-w-[28ch] text-sm text-muted-foreground">
             One unified SDK for agent sandbox providers. Swap the adapter, keep
             your code.
           </p>
         </div>
         {COLUMNS.map((col) => (
           <div key={col.heading}>
-            <p className="text-sm font-medium text-foreground">{col.heading}</p>
+            <p className="font-data text-[10px] tracking-[0.18em] text-dim uppercase">
+              {col.heading}
+            </p>
             <ul className="mt-3 space-y-2">
               {col.links.map((link) => (
                 <li key={link.href}>

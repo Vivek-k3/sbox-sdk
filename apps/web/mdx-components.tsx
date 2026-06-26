@@ -8,6 +8,8 @@ import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 import defaultMdxComponents from "fumadocs-ui/mdx";
 import type { MDXComponents } from "mdx/types";
 
+import { CapabilityMatrix } from "@/components/sections/capability-matrix";
+
 const typeGenerator = createGenerator({
   cache: createFileSystemGeneratorCache(".next/fumadocs-typescript"),
 });
@@ -19,6 +21,7 @@ export const getMDXComponents = (
   AutoTypeTable: (props: Partial<AutoTypeTableProps>) => (
     <AutoTypeTable {...props} generator={typeGenerator} />
   ),
+  CapabilityMatrix,
   Tab,
   Tabs,
   ...components,

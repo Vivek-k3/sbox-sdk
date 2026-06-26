@@ -32,6 +32,166 @@ code,
   }
 }
 
+/* Provider cube — the hero's brand centerpiece. Translucent glass faces so
+   the back faces read through for depth; a teal rim and inner highlight. */
+.cube-face {
+  border: 1px solid color-mix(in oklab, var(--native) 32%, transparent);
+  background: color-mix(in oklab, var(--card) 58%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, var(--foreground) 8%, transparent),
+    0 20px 60px -28px color-mix(in oklab, var(--native) 45%, transparent);
+}
+
+.cube-glow {
+  background: radial-gradient(
+    circle,
+    color-mix(in oklab, var(--native) 24%, transparent),
+    transparent 62%
+  );
+}
+
+/* Abstract compute-slab internals (lab gallery). */
+.monolith-grid {
+  background:
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 18px,
+      color-mix(in oklab, var(--native) 26%, transparent) 19px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 18px,
+      color-mix(in oklab, var(--native) 26%, transparent) 19px
+    );
+}
+
+.scanline-bar {
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in oklab, var(--native) 55%, transparent),
+    transparent
+  );
+}
+
+.hex-clip {
+  clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
+}
+
+/* Gradient brand keyword. */
+.brand-gradient {
+  background-image: linear-gradient(
+    100deg,
+    var(--foreground),
+    color-mix(in oklab, var(--native) 90%, var(--foreground))
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+@keyframes spin-y {
+  to {
+    transform: rotateY(360deg);
+  }
+}
+
+@keyframes spin-y-rev {
+  to {
+    transform: rotateY(-360deg);
+  }
+}
+
+@keyframes drift {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes scanline {
+  0% {
+    transform: translateY(-120%);
+  }
+  100% {
+    transform: translateY(520%);
+  }
+}
+
+@keyframes spin-x {
+  to {
+    transform: rotateX(360deg);
+  }
+}
+
+@keyframes spin-z {
+  to {
+    transform: rotateZ(360deg);
+  }
+}
+
+@keyframes wave {
+  0%,
+  100% {
+    transform: translateZ(0);
+  }
+  50% {
+    transform: translateZ(30px);
+  }
+}
+
+@keyframes tunnel {
+  0% {
+    opacity: 0;
+    transform: translateZ(-900px) rotate(var(--spin, 0deg));
+  }
+  18% {
+    opacity: 1;
+  }
+  82% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateZ(240px) rotate(var(--spin, 0deg));
+  }
+}
+
+@keyframes pulse-ring {
+  0% {
+    opacity: 0;
+    transform: scale(0.15);
+  }
+  22% {
+    opacity: 0.85;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.7);
+  }
+}
+
+@keyframes explode {
+  0%,
+  100% {
+    transform: translateZ(100px);
+  }
+  50% {
+    transform: translateZ(154px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marquee-track {
+    animation: none !important;
+  }
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -53,6 +213,13 @@ code,
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
   --color-destructive: var(--destructive);
+  --font-display: var(--font-display);
+  --font-data: var(--font-data);
+  --color-native: var(--native);
+  --color-emulated: var(--emulated);
+  --color-dim: var(--dim);
+  --color-wire: var(--wire);
+  --color-panel: var(--panel);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -82,6 +249,15 @@ code,
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
   --radius: 0.625rem;
+
+  /* Capability triad — the product's own semantic system, doubling as the brand
+     palette. native = first-class (and the accent color), emulated = polyfilled,
+     dim = unsupported / captions. Deeper here for contrast on paper. */
+  --native: #0f9b78;
+  --emulated: #b9791b;
+  --dim: #79817f;
+  --wire: color-mix(in oklab, var(--native) 22%, transparent);
+  --panel: oklch(0.985 0 0);
 }
 
 .dark {
@@ -103,4 +279,47 @@ code,
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
+
+  /* Brighter on ink so the triad reads as a powered indicator. */
+  --native: #2bd0a6;
+  --emulated: #e6a23c;
+  --dim: #8b9390;
+  --wire: color-mix(in oklab, var(--native) 26%, transparent);
+  --panel: oklch(0.185 0 0);
+}
+
+@keyframes caret-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes sheen {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* The instrument-panel bezel: a hairline frame with a faint inner glow that
+   adapts to either theme. Used by the two signature panels. */
+.panel-bezel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  box-shadow:
+    0 1px 0 0 color-mix(in oklab, var(--foreground) 4%, transparent) inset,
+    0 24px 60px -32px color-mix(in oklab, var(--foreground) 30%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-\[caret-blink_1s_steps\(1\)_infinite\] {
+    animation: none !important;
+  }
 }
