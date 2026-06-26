@@ -1,0 +1,81 @@
+---
+title: Vercel AI SDK
+description: Project sandbox tools into the AI SDK's tool() shape as a map for generateText / streamText. Use the ai() plugin with the aiSdk() framework, or the standalone toAISDKTools().
+---
+
+## Installation
+
+`ai` is an optional peer dependency, loaded only when you use this adapter.
+
+```package-install
+sbox-sdk ai
+```
+
+## Usage
+
+Pass the `aiSdk()` framework to the `ai()` plugin and `sandbox.tools` is a tool map you pass straight to `generateText` or `streamText`:
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { e2b } from "sbox-sdk/e2b";
+import { ai } from "sbox-sdk/ai";
+import { aiSdk } from "sbox-sdk/ai-sdk";
+import { openai } from "@ai-sdk/openai";
+import { generateText } from "ai";
+
+const client = createSandboxClient({
+  provider: e2b({ apiKey: process.env.E2B_API_KEY! }),
+  plugins: [ai({ framework: aiSdk() })],
+});
+
+const sandbox = await client.create({ template: "node" });
+
+const result = await generateText({
+  model: openai("gpt-4o"),
+  prompt: "Write app.js that prints the current date, then run it.",
+  tools: sandbox.tools, // Record<string, Tool>, keyed by tool name
+  stopWhen: ({ steps }) => steps.length > 8,
+});
+```
+
+`sandbox.tools` is a `Record<string, Tool>`, capability-gated to the provider. Each tool's `execute` runs the sandbox operation and returns the result as text the model reads.
+
+## Standalone
+
+Build the same map explicitly — useful for filtering or merging with your own tools:
+
+```ts
+import { toAISDKTools } from "sbox-sdk/ai-sdk";
+
+const tools = {
+  ...toAISDKTools(sandbox, {
+    only: ["sbox_exec", "sbox_fs_read", "sbox_fs_write"],
+  }),
+  ...myOtherTools,
+};
+```
+
+`toAISDKTools` accepts a live `Sandbox` (capability-gated for you) or a pre-built `ToolSpec[]`.
+
+## Approval
+
+The stable AI SDK (`ai@5`) has no `needsApproval` field on a tool, so this adapter enforces the [policy](/ai/approval) inside `execute`: a `deny` decision returns a message the model reads, and `ask` awaits `policy.onApprovalRequest` when you provide one.
+
+```ts
+plugins: [
+  ai({
+    framework: aiSdk(),
+    policy: {
+      defaults: { destructive: "ask" },
+      onApprovalRequest: async (req) => askUser(req.title),
+    },
+  }),
+];
+```
+
+For AI SDK v7's call-site approval, `toolApproval(sandbox)` builds the matching `{ [toolName]: (input) => "user-approval" | undefined }` map from the same policy.
+
+## Notes
+
+- Peer range: `ai@^5 || ^6`.
+- Returns each tool's result as text. Mastra agents accept AI SDK tools too — see [Mastra](/ai/mastra).

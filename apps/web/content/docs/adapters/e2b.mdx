@@ -1,0 +1,55 @@
+---
+title: E2B
+description: The canonical reference adapter — richest capability set, with a code interpreter, snapshots, native ports, and pause/resume. Backed by @e2b/code-interpreter.
+---
+
+## Installation
+
+`@e2b/code-interpreter` is an optional peer dependency of `sbox-sdk`, loaded lazily on first use — install it alongside the SDK so the adapter's import resolves at runtime.
+
+```package-install
+sbox-sdk @e2b/code-interpreter
+```
+
+## Usage
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { e2b } from "sbox-sdk/e2b";
+
+const client = createSandboxClient({
+  provider: e2b({ apiKey: process.env.E2B_API_KEY! }),
+});
+
+const sandbox = await client.create({ template: "python-3.12", ttlMs: 60_000 });
+
+// E2B has a code interpreter, so `sandbox.code` is defined:
+const exec = await sandbox.code.runCode("import matplotlib; print('ok')");
+console.log(exec.logs.stdout);
+```
+
+E2B is the richest adapter and the reference implementation other adapters are measured against. [`template`](/templates) maps to an E2B template id / alias (e.g. `"python-3.12"` or a custom-built template).
+
+## Options
+
+<AutoTypeTable
+  path="../../packages/sbox-sdk/src/e2b/index.ts"
+  name="E2BOptions"
+/>
+
+## Capabilities
+
+| Capability                                 |    Level    | Notes                                              |
+| ------------------------------------------ | :---------: | -------------------------------------------------- |
+| `list` / `pause` / `setTimeout`            |   native    |                                                    |
+| `stop`                                     | unsupported | E2B has no stop-without-destroy                    |
+| `background` / `streaming` / `killProcess` |   native    |                                                    |
+| `filesWatch` / `filesUpload`               |   native    |                                                    |
+| `codeInterpreter` / `statefulKernel`       |   native    | `sandbox.code` is defined                          |
+| `exposePort`                               |   native    | preview via subdomain                              |
+| `snapshot`                                 |   native    |                                                    |
+| `fork`                                     | unsupported |                                                    |
+| `metrics`                                  |   native    |                                                    |
+| `egressControl` / `ssh` / `proxiedFetch`   | unsupported | use [`raw()`](/escape-hatch) for E2B-only features |
+
+`preservesMemoryOnPause` is `true`; `previewModel` is `subdomain`.

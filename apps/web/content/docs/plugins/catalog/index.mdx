@@ -1,0 +1,42 @@
+---
+title: Catalog
+description: Every plugin that ships with sbox SDK, and what's on the roadmap. AI tool providers are available today; middleware, lifecycle, and MCP plugins are next.
+---
+
+## Available
+
+### AI providers
+
+The first plugin kind. The single [`ai()`](/ai/providers) plugin grafts a framework-shaped `sandbox.tools` onto the sandbox; you pick the framework by passing its adapter. See the **AI** group in the sidebar for each framework, or [AI providers](/ai/providers) for the shared behavior.
+
+| Framework                           | Adapter          | Import               | `sandbox.tools` |
+| ----------------------------------- | ---------------- | -------------------- | --------------- |
+| [Vercel AI SDK](/ai/ai-sdk)         | `aiSdk()`        | `sbox-sdk/ai-sdk`    | tool map        |
+| [Mastra](/ai/mastra)                | `mastra()`       | `sbox-sdk/mastra`    | tool map        |
+| [OpenAI Agents](/ai/openai)         | `openaiAgents()` | `sbox-sdk/openai`    | tool array      |
+| [Anthropic / Claude](/ai/anthropic) | `anthropic()`    | `sbox-sdk/anthropic` | runnable tools  |
+| [LangChain](/ai/langchain)          | `langchain()`    | `sbox-sdk/langchain` | tool array      |
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { e2b } from "sbox-sdk/e2b";
+import { ai } from "sbox-sdk/ai";
+import { aiSdk } from "sbox-sdk/ai-sdk";
+
+const client = createSandboxClient({
+  provider: e2b(),
+  plugins: [ai({ framework: aiSdk() })],
+});
+```
+
+## Coming soon
+
+The plugin interface reserves these kinds. They aren't shipped yet — they're where the system is headed, and you can build any of them today with [a custom plugin](/plugins/authoring).
+
+| Plugin                                    | Kind         | What it will do                                                        |
+| ----------------------------------------- | ------------ | ---------------------------------------------------------------------- |
+| [Middleware](/plugins/catalog/middleware) | `middleware` | Wrap tool and command calls — audit, redaction, metrics.               |
+| [Lifecycle](/plugins/catalog/lifecycle)   | `lifecycle`  | Bootstrap a sandbox on `create()` — seed files, install deps, warm up. |
+| [MCP server](/plugins/catalog/mcp)        | `mcp`        | Expose the sandbox's tools over the Model Context Protocol.            |
+
+Have a plugin idea? [Open an issue](https://github.com/sbox-sdk/sbox-sdk/issues), or write it yourself — the interface is small and stable.

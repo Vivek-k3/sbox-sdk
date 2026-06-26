@@ -1,0 +1,71 @@
+---
+title: Errors
+description: Every provider normalizes to one SandboxError taxonomy — a small set of codes, a retryable flag, and the native error preserved on cause.
+---
+
+Providers never leak their native SDK errors past the adapter boundary. Everything routes through one normalized taxonomy, so your error handling is written once and works across every provider.
+
+## `SandboxError`
+
+The base class. Key fields:
+
+| Field       | Type               | Meaning                                 |
+| ----------- | ------------------ | --------------------------------------- |
+| `code`      | `SandboxErrorCode` | The normalized category (see below)     |
+| `provider`  | `string?`          | Which adapter raised it                 |
+| `status`    | `number?`          | Underlying HTTP status, if any          |
+| `retryable` | `boolean`          | Whether a retry could plausibly succeed |
+| `timedOut`  | `boolean`          | True for timeout/abort                  |
+| `aborted`   | `boolean`          | True when an `AbortSignal` fired        |
+
+The original error is preserved on `cause`. Use the static `SandboxError.wrap(err, provider?)` to coerce any thrown value into a `SandboxError` (pass-through if it already is one).
+
+## Error codes
+
+```ts
+type SandboxErrorCode =
+  | "NotFound" // sandbox / process / file / snapshot id unknown
+  | "Unauthorized" // bad or expired credentials
+  | "Timeout" // op exceeded timeoutMs / TTL
+  | "QuotaExceeded" // provider resource / billing limit
+  | "NotSupported" // capability gap — thrown BEFORE any network call
+  | "Conflict" // idempotency / state conflict
+  | "ProviderNotFound" // unknown provider id
+  | "Validation" // bad options
+  | "AllProvidersFailed" // every provider in the fallback chain failed
+  | "Provider"; // catch-all normalized provider / network failure
+```
+
+`Timeout`, `QuotaExceeded`, and `Provider` are **retryable by default**.
+
+## Specialized classes
+
+| Class                     | When                                                                                  |
+| ------------------------- | ------------------------------------------------------------------------------------- |
+| `NotSupportedError`       | A capability gap — thrown **synchronously, before any network call**. Adds `feature`. |
+| `ProviderNotFoundError`   | Unknown provider id.                                                                  |
+| `AllProvidersFailedError` | Every provider in a fallback chain failed; carries `attempts[]`.                      |
+
+## Rules worth knowing
+
+- `commands.run(...)` **never throws on a non-zero exit** — the exit code is data (`result.exitCode`), not an error.
+- `files.exists()` returns `false` only on `NotFound`; auth and timeout errors still throw.
+- `NotSupportedError` is thrown up front, before any network call, so an unsupported feature fails fast and cheap.
+
+## Helpers
+
+```ts
+import { isRetryableError, isRetryableStatus } from "sbox-sdk";
+
+try {
+  await sandbox.commands.run("...");
+} catch (err) {
+  if (isRetryableError(err)) {
+    // err is a retryable SandboxError
+  }
+}
+
+isRetryableStatus(429); // true (408 / 409 / 425 / 429 / >= 500)
+```
+
+See [Retries & fallback](/retries) for how the client uses `retryable` to drive automatic retry and provider fallback.

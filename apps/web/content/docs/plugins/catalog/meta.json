@@ -1,0 +1,12 @@
+{
+  "title": "Catalog",
+  "defaultOpen": true,
+  "pages": [
+    "index",
+    "ai",
+    "---Coming soon---",
+    "middleware",
+    "lifecycle",
+    "mcp"
+  ]
+}

@@ -1,0 +1,78 @@
+---
+title: AI providers
+description: AI-provider plugins shape sandbox.tools for your framework — capability-gated, policy-aware, and typed. One per client, configurable per sandbox.
+---
+
+An **AI-provider plugin** is the first [plugin](/plugins/overview) kind. It grafts a framework-shaped `sandbox.tools` onto every sandbox the client builds. This page covers what's specific to AI providers; for the general plugin mechanism, see [Plugins](/plugins/overview).
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { e2b } from "sbox-sdk/e2b";
+import { ai } from "sbox-sdk/ai";
+import { aiSdk } from "sbox-sdk/ai-sdk";
+
+const client = createSandboxClient({
+  provider: e2b({ apiKey: process.env.E2B_API_KEY! }),
+  plugins: [ai({ framework: aiSdk() })],
+});
+
+const sandbox = await client.create();
+sandbox.tools; // typed for the AI SDK, ready for generateText({ tools })
+```
+
+## The shape follows the provider _and_ the framework
+
+`sandbox.tools` is resolved on two axes at once:
+
+- **Capability-gated to the provider** — a tool only appears if the provider supports it. On a provider without a code interpreter, `sbox_run_code` simply isn't there. See [Tools](/ai/tools).
+- **Typed for the framework** — the framework you pass to `ai()` decides the type: a tool map for the AI SDK, an array for OpenAI Agents, runnable tools for Claude.
+
+Swap `e2b()` for `vercel()` and `sandbox.tools` re-shapes to the new provider's capabilities with no change to your agent code.
+
+## One AI-provider per client
+
+An agent runs in exactly one framework — you hand `sandbox.tools` to a single `generateText(...)` or `new Agent({ tools })` call — so a single shape is correct. The client **throws** if you pass two AI-provider plugins:
+
+```ts
+// ❌ throws: a client supports one AI-provider plugin
+createSandboxClient({
+  provider: e2b(),
+  plugins: [ai({ framework: aiSdk() }), ai({ framework: openaiAgents() })],
+});
+```
+
+Need two framework shapes from one sandbox (libraries, benchmarks)? Use the standalone `toXTools(sandbox)` functions, or read the provider-neutral registry with `createSandboxTools(sandbox)`. Other [plugin kinds](/plugins/overview#plugin-kinds) stack freely alongside an AI provider.
+
+## Policy per sandbox
+
+The framework is fixed on the client, but a sandbox's trust posture often isn't — you may run trusted internal work in one sandbox and untrusted user code in another. Pass per-sandbox overrides as the second argument to `create`:
+
+```ts
+const client = createSandboxClient({
+  provider: e2b(),
+  plugins: [ai({ framework: aiSdk(), policy: trustedDefaults })], // default policy
+});
+
+// Tighten approval for this sandbox only:
+const box = await client.create(spec, {
+  policy: { defaults: { mutating: "ask", destructive: "deny" } },
+});
+```
+
+Overrides apply to `policy`, `only`, and `forbid` — never the framework. See [Approval](/ai/approval).
+
+## Configuring a plugin
+
+Every AI-provider plugin accepts the same options as its standalone function — a `policy`, an `only` allow-list, and a `forbid` list:
+
+```ts
+plugins: [
+  ai({
+    framework: aiSdk(),
+    only: ["sbox_exec", "sbox_fs_read", "sbox_fs_write"],
+    policy: { forbid: ["sbox_set_egress"] },
+  }),
+];
+```
+
+See the per-framework pages for each plugin's output shape and approval behavior: [Vercel AI SDK](/ai/ai-sdk), [Mastra](/ai/mastra), [OpenAI Agents](/ai/openai), [Anthropic](/ai/anthropic), [LangChain](/ai/langchain).

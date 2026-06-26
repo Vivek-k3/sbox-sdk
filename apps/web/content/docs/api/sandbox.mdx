@@ -1,0 +1,59 @@
+---
+title: Sandbox
+description: The object you hold after create() — always-present commands and files namespaces, capability-gated sub-APIs, lifecycle methods, and the raw() escape hatch.
+---
+
+A `Sandbox` is what `client.create()` and `client.connect()` return. It groups everything into namespaces, with capability-gated sub-APIs typed `undefined` when the provider can't support them.
+
+## Members
+
+| Member                                                 | Type                                | Presence                             |
+| ------------------------------------------------------ | ----------------------------------- | ------------------------------------ |
+| `id` / `name?` / `provider`                            | `string`                            | always                               |
+| `capabilities`                                         | `Capabilities`                      | always                               |
+| `commands`                                             | `CommandsAPI`                       | **always** (universal)               |
+| `files`                                                | `FilesAPI`                          | **always** (native or polyfilled)    |
+| `ports`                                                | `PortsAPI \| undefined`             | gated on `exposePort`                |
+| `code`                                                 | `CodeAPI \| undefined`              | gated on `codeInterpreter`           |
+| `snapshots`                                            | `SnapshotsAPI \| undefined`         | gated on `snapshot`                  |
+| `network`                                              | `NetworkAPI \| undefined`           | gated on `egressControl`             |
+| `getInfo`                                              | `() => Promise<SandboxInfo>`        | always                               |
+| `setTimeout` / `stop` / `pause` / `resume` / `destroy` | `(…) => Promise<void>`              | always (runtime-gated)               |
+| `can`                                                  | `<K>(cap: K) => this is Sandbox<…>` | runtime check + type guard           |
+| `raw`                                                  | `() => Raw`                         | the native client, typed per adapter |
+
+## Capability gating
+
+`ports`, `code`, `snapshots`, and `network` are typed `undefined` on providers that don't support them, so a guard is required — and the absence is caught at compile time:
+
+```ts
+if (sandbox.code) {
+  await sandbox.code.runCode("print(1)");
+}
+```
+
+For dynamically-chosen providers, `can()` narrows at runtime and the type level:
+
+```ts
+if (sandbox.can("snapshot")) {
+  await sandbox.snapshots.create({ name: "ckpt" });
+}
+```
+
+See [Capabilities](/capabilities) for the model, and [Escape hatch](/escape-hatch) for `raw()`.
+
+## `SandboxInfo`
+
+Returned by `getInfo()`:
+
+```ts
+interface SandboxInfo {
+  readonly id: string;
+  readonly name?: string;
+  readonly state: SandboxState; // "creating" | "running" | "paused" | "stopped" | "destroyed" | "error" | "unknown"
+  readonly provider: string;
+  readonly metadata: Readonly<Record<string, string>>;
+  readonly createdAt?: Date;
+  readonly raw: unknown; // the original provider payload
+}
+```

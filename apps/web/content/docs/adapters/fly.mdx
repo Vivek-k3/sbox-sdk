@@ -1,0 +1,62 @@
+---
+title: Fly Machines
+description: A sandbox per Fly Machine over the Machines REST API. Pure fetch — no SDK — so it runs anywhere the core does, including the edge.
+---
+
+## Installation
+
+No provider SDK required — the adapter talks to the Fly Machines REST API with `fetch`, so it's edge-portable.
+
+```package-install
+sbox-sdk
+```
+
+## Usage
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { fly } from "sbox-sdk/fly";
+
+const client = createSandboxClient({
+  provider: fly({
+    apiToken: process.env.FLY_API_TOKEN!,
+    appName: "my-fly-app", // must already exist
+    region: "iad",
+  }),
+});
+
+const sandbox = await client.create({ template: "ubuntu:22.04" });
+const res = await sandbox.commands.run("uname -a");
+console.log(res.stdout);
+```
+
+The Fly app must exist; each sandbox is a **Machine** inside it. [`template`](/templates) is the machine's container image.
+
+<Callout type="warn">
+  Fly's `/exec` is **buffered** and has no per-command `cwd`/`env`, so the core
+  folds those into a `cd … && KEY=v …` wrapper (`perCommandEnvCwd: false`) and
+  `streaming` is emulated. `stop()` releases compute but the **rootfs resets**
+  unless a volume is attached (`preservesDiskOnStop: false`). Files are read and
+  written via `exec` + `base64`.
+</Callout>
+
+## Options
+
+<AutoTypeTable
+  path="../../packages/sbox-sdk/src/fly/index.ts"
+  name="FlyOptions"
+/>
+
+## Capabilities
+
+| Capability          |    Level    | Notes                           |
+| ------------------- | :---------: | ------------------------------- |
+| `list` / `region`   |   native    |                                 |
+| `stop` / `pause`    |   native    | `pause` = suspend (memory kept) |
+| `streaming`         |  emulated   | `/exec` is buffered             |
+| `filesUpload`       |   native    | via `exec` + base64             |
+| `exposePort`        |   native    | preview at `<app>.fly.dev`      |
+| `codeInterpreter`   | unsupported |                                 |
+| `snapshot` / `fork` | unsupported |                                 |
+
+`perCommandEnvCwd` is `false` (core wraps); `preservesMemoryOnPause` is `true`; `preservesDiskOnStop` is `false`; `previewModel` is `subdomain`.

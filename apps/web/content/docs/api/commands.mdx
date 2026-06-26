@@ -1,0 +1,64 @@
+---
+title: commands
+description: Run, spawn, stream, and kill processes. commands.run returns a handle that is both a Promise and an AsyncIterable, and never throws on a non-zero exit.
+---
+
+`sandbox.commands` is always present. It covers process execution across every adapter.
+
+## `run(cmd, opts?)`
+
+Returns an `ExecHandle` — both a `Promise<ExecResult>` and an `AsyncIterable<OutputEvent>`. `await` it to buffer, or `for await` the **same handle** to stream live. It **never throws on a non-zero exit** — the exit code is data.
+
+```ts
+// Buffered:
+const res = await sandbox.commands.run("npm test", { cwd: "/app" });
+res.exitCode; // number — non-zero is NOT an error
+res.stdout;
+res.stderr;
+
+// Streamed (same handle):
+for await (const ev of sandbox.commands.run(["python", "train.py"])) {
+  if (ev.type === "stdout") process.stdout.write(ev.data);
+  if (ev.type === "exit") console.log(ev.exitCode);
+}
+```
+
+`cmd` is a `string` or `string[]`. The handle also exposes `pid: Promise<string>`, `stdout` / `stderr` as `ReadableStream`s, `kill(signal?)`, and `writeStdin(data)`.
+
+### `ExecOptions`
+
+<AutoTypeTable
+  path="../../packages/sbox-sdk/src/internal/types.ts"
+  name="ExecOptions"
+/>
+
+### `ExecResult`
+
+```ts
+interface ExecResult {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly exitCode: number;
+  readonly exitCodeSynthesized?: boolean; // true when parsed from a $? echo
+}
+```
+
+### `OutputEvent`
+
+```ts
+type OutputEvent =
+  | { type: "stdout"; data: string }
+  | { type: "stderr"; data: string }
+  | { type: "exit"; exitCode: number; signal?: string };
+```
+
+## Other methods
+
+| Method    | Signature                               | Notes                         |
+| --------- | --------------------------------------- | ----------------------------- |
+| `spawn`   | `(cmd, opts?) => Promise<Process>`      | Long-lived background process |
+| `connect` | `(processId) => Promise<Process>`       | Reattach to a running process |
+| `kill`    | `(processId, signal?) => Promise<void>` |                               |
+| `list`    | `() => Promise<ProcessInfo[]>`          |                               |
+
+`spawn`, `connect`, and `kill` require the `background` / `killProcess` capabilities — they throw `NotSupportedError` on providers that lack them.

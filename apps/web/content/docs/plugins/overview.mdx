@@ -1,0 +1,70 @@
+---
+title: Overview
+description: Plugins extend every sandbox a client builds — graft properties onto the sandbox, hook its lifecycle, and add cross-cutting behavior. AI tool providers are the first plugin kind.
+---
+
+## What is a plugin?
+
+A plugin augments every sandbox a client builds. You pass plugins to `createSandboxClient`, and they apply to every sandbox from `create()` and `connect()` — including [forked](/api/snapshots) children.
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { e2b } from "sbox-sdk/e2b";
+import { ai } from "sbox-sdk/ai";
+import { aiSdk } from "sbox-sdk/ai-sdk";
+
+const client = createSandboxClient({
+  provider: e2b({ apiKey: process.env.E2B_API_KEY! }),
+  plugins: [ai({ framework: aiSdk() })], // an AI-provider plugin
+});
+```
+
+The first plugin most people reach for is an **[AI-provider plugin](/ai/providers)**, which grafts a framework-shaped `sandbox.tools` onto the sandbox. But the plugin system is general — middleware, bootstrap, and integration plugins all use the same interface.
+
+## The plugin interface
+
+A plugin is a small object. Every hook is optional — implement only what you need:
+
+```ts
+import type { SandboxPlugin } from "sbox-sdk";
+
+interface SandboxPlugin<Ext extends object = object> {
+  readonly name: string;
+  /** Discriminant; the client allows at most one "ai-provider" plugin. */
+  readonly kind?: "ai-provider" | "middleware" | "lifecycle" | "mcp";
+  /** Synchronous: returns properties merged onto the sandbox object. */
+  extend?(sandbox: Sandbox, ctx: PluginSetupContext): Ext;
+  /** Async side-effects, awaited after the sandbox is built. */
+  onCreate?(
+    sandbox: Sandbox & Ext,
+    ctx: PluginSetupContext
+  ): void | Promise<void>;
+  /** Runs before the sandbox is destroyed. */
+  onDestroy?(sandbox: Sandbox): void | Promise<void>;
+}
+```
+
+- **`extend`** grafts typed properties onto the sandbox — this is how the [`ai()`](/ai/providers) plugin adds `sandbox.tools`. It is synchronous, so the sandbox is ready to use the moment `create()` resolves.
+- **`onCreate`** runs async side-effects once the sandbox exists — seed files, install dependencies, start a dev server.
+- **`onDestroy`** runs cleanup before the sandbox is torn down — flush an audit log, stop a server.
+
+The properties a plugin contributes via `extend` are **typed**: pass `SandboxPlugin<{ tools: ... }>` and `sandbox.tools` shows up on the sandbox type, with no `any`.
+
+## Plugin kinds
+
+The `kind` field groups plugins by what they do. Today the AI-provider kind ships; the others are reserved and on the roadmap — see the [catalog](/plugins/catalog).
+
+| Kind          | Purpose                                                | Status    |
+| ------------- | ------------------------------------------------------ | --------- |
+| `ai-provider` | Shape `sandbox.tools` for an agent framework           | Available |
+| `middleware`  | Wrap tool / command calls — audit, redaction, metrics  | Planned   |
+| `lifecycle`   | Bootstrap a sandbox on create — seed, install, warm up | Planned   |
+| `mcp`         | Expose the sandbox over the Model Context Protocol     | Planned   |
+
+The client enforces **at most one `ai-provider` plugin** (an agent runs in one framework, so `sandbox.tools` has one shape). Plugins of other kinds stack freely.
+
+## Next steps
+
+- [Catalog](/plugins/catalog) — every available plugin, and what's planned.
+- [Writing a plugin](/plugins/authoring) — build your own with the `SandboxPlugin` interface.
+- [AI providers](/ai/providers) — the first plugin kind, in depth.

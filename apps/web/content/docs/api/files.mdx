@@ -1,0 +1,62 @@
+---
+title: files
+description: The filesystem namespace — read, write, list, mkdir, remove, rename, stat, exists, upload, download, and watch. Web-standard bodies in, StoredFile out.
+---
+
+`sandbox.files` is always present — native where the provider has filesystem primitives, and polyfilled over `exec` where it doesn't.
+
+## Bodies and `StoredFile`
+
+Write bodies are web-standard: `string | Uint8Array | ReadableStream<Uint8Array>`. Reads return a `StoredFile`:
+
+```ts
+interface StoredFile {
+  path: string;
+  text(): Promise<string>;
+  bytes(): Promise<Uint8Array>;
+  stream(): ReadableStream<Uint8Array>;
+}
+```
+
+```ts
+await sandbox.files.write("/app/data.json", JSON.stringify({ ok: true }));
+const file = await sandbox.files.read("/app/data.json");
+const text = await file.text();
+```
+
+## Methods
+
+| Method              | Signature                                        |
+| ------------------- | ------------------------------------------------ |
+| `read` / `download` | `(path) => Promise<StoredFile>`                  |
+| `write` / `upload`  | `(path, data: FileBody) => Promise<void>`        |
+| `list`              | `(path) => Promise<DirEntry[]>`                  |
+| `mkdir`             | `(path, { recursive? }) => Promise<void>`        |
+| `remove`            | `(path, { recursive? }) => Promise<void>`        |
+| `rename`            | `(from, to) => Promise<void>`                    |
+| `stat`              | `(path) => Promise<FileInfo>`                    |
+| `exists`            | `(path) => Promise<boolean>`                     |
+| `watch`             | `(path, cb, { recursive? }) => Promise<Watcher>` |
+
+## Notes
+
+- `exists()` returns `false` **only** on `NotFound` — auth and timeout errors still throw. See [Errors](/errors).
+- `watch()` requires the `filesWatch` capability and throws `NotSupportedError` where it's unsupported.
+- On providers without native filesystem methods, `list` / `mkdir` / `remove` / `rename` / `stat` are polyfilled by the core via `exec`.
+
+### `FileInfo` & `DirEntry`
+
+```ts
+interface FileInfo {
+  path: string;
+  type: "file" | "dir" | "symlink";
+  size: number;
+  mtime?: Date;
+}
+
+interface DirEntry {
+  name: string;
+  path: string;
+  type: "file" | "dir" | "symlink";
+}
+```

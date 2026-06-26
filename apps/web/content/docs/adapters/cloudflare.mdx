@@ -1,0 +1,60 @@
+---
+title: Cloudflare Sandbox
+description: Cloudflare Sandbox via a Worker / Durable Object binding — a code interpreter, native ports with proxied fetch, and get-or-create semantics. Worker-only.
+---
+
+## Installation
+
+`@cloudflare/sandbox` is an optional peer dependency, used from inside a Cloudflare Worker. The adapter needs the **Durable Object namespace binding** for your exported Sandbox class.
+
+```package-install
+sbox-sdk @cloudflare/sandbox
+```
+
+## Usage
+
+Cloudflare is **Worker-only** — it runs against a live Durable Object binding, not a plain Node process. Pass the binding from your Worker `env`:
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { cloudflare } from "sbox-sdk/cloudflare";
+
+export default {
+  async fetch(request: Request, env: Env) {
+    const client = createSandboxClient({
+      provider: cloudflare({
+        binding: env.Sandbox, // your Durable Object namespace
+        hostname: "my-worker.example.com", // for preview URLs
+      }),
+    });
+
+    const sandbox = await client.create({ name: "session-42" });
+    const exec = await sandbox.code.runCode("print('hello from the edge')");
+    return Response.json({ logs: exec.logs });
+  },
+};
+```
+
+The base image is defined by your Worker's container config at deploy time, so [`template`](/templates) is ignored. `create()` uses `name` (or the idempotency key) as the Durable Object id, giving **get-or-create** semantics. `list` is unsupported.
+
+## Options
+
+<AutoTypeTable
+  path="../../packages/sbox-sdk/src/cloudflare/index.ts"
+  name="CloudflareOptions"
+/>
+
+## Capabilities
+
+| Capability                               |    Level    | Notes                                      |
+| ---------------------------------------- | :---------: | ------------------------------------------ |
+| `setTimeout`                             |   native    |                                            |
+| `streaming`                              |   native    |                                            |
+| `filesUpload`                            |   native    |                                            |
+| `codeInterpreter` / `statefulKernel`     |   native    | `sandbox.code` is defined                  |
+| `exposePort`                             |   native    | preview via wildcard DNS                   |
+| `proxiedFetch`                           |   native    | `ports.fetch()` proxies through the Worker |
+| `list` / `stop` / `pause` / `background` | unsupported |                                            |
+| `snapshot` / `fork`                      | unsupported |                                            |
+
+`previewModel` is `wildcardDNS`.

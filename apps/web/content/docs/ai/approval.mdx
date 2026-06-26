@@ -1,0 +1,80 @@
+---
+title: Approval
+description: One SandboxPolicy decides allow / ask / deny per tool call. Each framework maps "ask" to its native human-in-the-loop. Destructive actions pause by default.
+---
+
+## Why approval
+
+Sandboxes exist to run untrusted code, and an agent calling `sbox_fs_remove` or `sbox_lifecycle` with `action: "destroy"` is exactly the kind of action you may want a human to confirm. A single `SandboxPolicy` governs every tool, on every framework.
+
+## The default posture
+
+Without any configuration, the policy is **destructive-asks**:
+
+| Risk          | Default | Examples                                                                                        |
+| ------------- | ------- | ----------------------------------------------------------------------------------------------- |
+| `safe`        | `allow` | `sbox_fs_read`, `sbox_fs_list`, `sbox_lifecycle` → `getInfo`                                    |
+| `mutating`    | `allow` | `sbox_exec`, `sbox_fs_write`, `sbox_run_code`, `sbox_expose_port`                               |
+| `destructive` | `ask`   | `sbox_fs_remove`, `sbox_lifecycle` → `stop` / `destroy`, `sbox_snapshot` → `restore` / `delete` |
+
+So reads, writes, and command execution run freely, while irreversible actions pause for approval.
+
+## Configuring the policy
+
+```ts
+import type { SandboxPolicy } from "sbox-sdk/agent-tools";
+
+const policy: SandboxPolicy = {
+  // Per-risk defaults (merged over the built-ins above).
+  defaults: { mutating: "ask", destructive: "deny" },
+
+  // Per-tool overrides — can inspect the actual input. Wins over `defaults`.
+  rules: {
+    sbox_exec: (input) =>
+      String((input as { command: string }).command).startsWith("rm ")
+        ? "ask"
+        : "allow",
+  },
+
+  // Hard removal — the tool never appears in the produced set.
+  forbid: ["sbox_set_egress"],
+
+  // Called for "ask" by frameworks without native HITL (see below).
+  onApprovalRequest: async (req) => {
+    return confirmWithHuman(`${req.title} — allow?`); // your UI / queue
+  },
+
+  // Observe every decision (logging, metrics, audit trails).
+  audit: (rec) => log.info(rec),
+};
+```
+
+Pass it to a plugin, a standalone function, or a single `create` call:
+
+```ts
+plugins: [ai({ framework: aiSdk(), policy })]; // client-wide default
+toAISDKTools(sandbox, { policy }); // standalone
+client.create(spec, { policy }); // this sandbox only
+```
+
+## How each framework handles "ask"
+
+The policy is authored once; each adapter maps a decision into that framework's native mechanism.
+
+| Decision | OpenAI Agents                                                                  | AI SDK · Mastra · Anthropic · LangChain                                                                   |
+| -------- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| `allow`  | runs                                                                           | runs                                                                                                      |
+| `ask`    | native `needsApproval` → a `RunResult` interruption your host approves/rejects | awaits `policy.onApprovalRequest`; runs if it resolves `true`, otherwise returns a denial the model reads |
+| `deny`   | denial message                                                                 | denial message                                                                                            |
+
+[OpenAI Agents](/ai/openai) has built-in human-in-the-loop, so `ask` surfaces as an interruption on the run result. The other frameworks have no native gate in their current releases, so `ask` calls your `onApprovalRequest` callback. If you don't provide one, `ask` proceeds — human-in-the-loop is opt-in, so the tools never silently block.
+
+## Risk classes
+
+Risk is a property of the tool (and, for multi-verb tools, the chosen action), not of the provider:
+
+- **`safe`** — read-only, no side effects.
+- **`mutating`** — changes state but is recoverable.
+- **`destructive`** — irreversible (deletes data, tears down or restores the sandbox).
+
+Override the decision for any risk via `defaults`, or for any specific tool via `rules`.

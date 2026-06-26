@@ -1,0 +1,42 @@
+---
+title: Installation
+description: Install sbox-sdk and the optional peer dependency for the adapter you're using — nothing else is bundled.
+---
+
+`sbox-sdk` is small and dependency-free at its core — a fetch-only, edge-portable runtime behind a tree of subpath exports. Install the package, then add the peer dependency for the adapter you're wiring up. Anything you don't import is never bundled.
+
+```package-install
+sbox-sdk
+```
+
+The package ships its own TypeScript types and is published as ESM (`"type": "module"`), targeting modern runtimes — Node 20+, Bun, Deno, and edge/Workers. The core does no `node:` imports, so it runs unchanged across runtimes.
+
+## Adapter peer dependencies
+
+Adapters are subpath exports — `sbox-sdk/e2b`, `sbox-sdk/vercel`, `sbox-sdk/cloudflare` — and each provider's native SDK is an **optional peer dependency**, loaded lazily on first `create()` / `connect()`. The SDK you don't import is never bundled, so install size and cold-start cost stay proportional to the providers you actually use.
+
+Install the peer dep alongside the SDK. For **E2B**:
+
+```package-install
+sbox-sdk @e2b/code-interpreter
+```
+
+For **Vercel Sandbox**:
+
+```package-install
+sbox-sdk @vercel/sandbox
+```
+
+For **Cloudflare Sandbox** (inside a Worker):
+
+```package-install
+sbox-sdk @cloudflare/sandbox
+```
+
+The [in-memory provider](/adapters/memory) needs no peer dependency at all — it's built in and is the zero-config default, ideal for tests.
+
+## Missing a peer dependency?
+
+Import an adapter without its peer installed and the lazy import throws `ERR_MODULE_NOT_FOUND` naming the missing package — the SDK doesn't vendor or shim provider clients, so the failure is loud and specific rather than a silent fallback. Install the named package and the import resolves.
+
+Once your adapter's package is in place, head to [Usage](/usage) to construct a client and run the core namespaces.

@@ -1,0 +1,63 @@
+---
+title: Daytona
+description: A full-featured sandbox — code interpreter with charts, stop/pause/resume, preview links, and regions. Backed by @daytonaio/sdk.
+---
+
+## Installation
+
+`@daytonaio/sdk` is an optional peer dependency of `sbox-sdk`, loaded lazily on first use.
+
+```package-install
+sbox-sdk @daytonaio/sdk
+```
+
+## Usage
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { daytona } from "sbox-sdk/daytona";
+
+const client = createSandboxClient({
+  provider: daytona({ apiKey: process.env.DAYTONA_API_KEY!, target: "us" }),
+});
+
+const sandbox = await client.create({ template: "debian:12" });
+
+// Daytona has a code interpreter, so `sandbox.code` is defined:
+const exec = await sandbox.code.runCode("print(2 + 2)");
+console.log(exec.logs.stdout);
+
+await sandbox.pause(); // preserves memory
+await sandbox.resume();
+```
+
+[`template`](/templates) is treated as a Daytona **snapshot** name, or — when it contains a `/` or `:` — as a container **image** (e.g. `"debian:12"`). Daytona's API works in **seconds**; the adapter converts from the SDK's milliseconds for you.
+
+<Callout type="info">
+  For v0.1, `snapshot` and `background` are scoped to `unsupported` to keep the
+  surface honest — reach for [`raw()`](/escape-hatch) for Daytona-only features
+  in the meantime.
+</Callout>
+
+## Options
+
+<AutoTypeTable
+  path="../../packages/sbox-sdk/src/daytona/index.ts"
+  name="DaytonaOptions"
+/>
+
+## Capabilities
+
+| Capability                         |    Level    | Notes                            |
+| ---------------------------------- | :---------: | -------------------------------- |
+| `list` / `setTimeout`              |   native    | `setTimeout` = autostop interval |
+| `stop` / `pause`                   |   native    | resume re-starts the sandbox     |
+| `streaming`                        |  emulated   | `executeCommand` is buffered     |
+| `filesUpload`                      |   native    |                                  |
+| `codeInterpreter`                  |   native    | `sandbox.code` is defined        |
+| `statefulKernel`                   | unsupported |                                  |
+| `exposePort`                       |   native    | tokenized preview links          |
+| `region`                           |   native    | `target: "us" \| "eu"`           |
+| `snapshot` / `fork` / `background` | unsupported |                                  |
+
+`preservesMemoryOnPause` and `preservesDiskOnStop` are both `true`; `previewModel` is `subdomain`.

@@ -1,0 +1,74 @@
+---
+title: OpenAI Agents
+description: Project sandbox tools into the OpenAI Agents SDK tool() shape as an array, with native needsApproval human-in-the-loop. Use the ai() plugin with the openaiAgents() framework, or toOpenAITools().
+---
+
+## Installation
+
+`@openai/agents` is an optional peer dependency.
+
+```package-install
+sbox-sdk @openai/agents
+```
+
+## Usage
+
+Pass the `openaiAgents()` framework to the `ai()` plugin and `sandbox.tools` is a tool array you pass to `new Agent`:
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { e2b } from "sbox-sdk/e2b";
+import { ai } from "sbox-sdk/ai";
+import { openaiAgents } from "sbox-sdk/openai";
+import { Agent, run } from "@openai/agents";
+
+const client = createSandboxClient({
+  provider: e2b({ apiKey: process.env.E2B_API_KEY! }),
+  plugins: [ai({ framework: openaiAgents() })],
+});
+
+const sandbox = await client.create({ template: "node" });
+
+const agent = new Agent({
+  name: "coder",
+  instructions: "You write and run code in a sandbox.",
+  tools: sandbox.tools, // Tool[]
+});
+
+const result = await run(
+  agent,
+  "Create app.js that prints hello, then run it."
+);
+```
+
+`sandbox.tools` is a `Tool[]`. Schemas are passed with `strict: true`; the SDK converts our optional fields to the nullable-and-required form OpenAI strict mode expects.
+
+## Standalone
+
+```ts
+import { toOpenAITools } from "sbox-sdk/openai";
+
+const tools = toOpenAITools(sandbox, { only: ["sbox_exec", "sbox_fs_read"] });
+```
+
+## Approval
+
+The OpenAI Agents SDK has **native human-in-the-loop**, so this adapter wires the [policy](/ai/approval) into `needsApproval`. An `ask` decision surfaces as a `tool_approval_requested` interruption on the `RunResult` — your host approves or rejects it, then re-runs:
+
+```ts
+let result = await run(agent, prompt);
+
+while (result.interruptions?.length) {
+  for (const interruption of result.interruptions) {
+    if (await humanApproves(interruption)) result.state.approve(interruption);
+    else result.state.reject(interruption);
+  }
+  result = await run(agent, result.state);
+}
+```
+
+A `deny` decision is enforced inside the tool and returns a message the model reads.
+
+## Notes
+
+- Peer range: `@openai/agents@>=0.12`.

@@ -1,0 +1,10 @@
+---
+title: Lifecycle (coming soon)
+description: Lifecycle plugins will bootstrap a sandbox on create — seed files, install dependencies, warm a dev server. Planned — build your own today.
+---
+
+<Callout type="info">Planned — not shipped yet.</Callout>
+
+Lifecycle plugins (`kind: "lifecycle"`) will bootstrap each sandbox when it's created — seed files, install dependencies, or warm up a dev server, so the sandbox is ready the moment `create()` resolves.
+
+The plugin interface already supports this via the `onCreate` hook, so you can build one today — see [Writing a plugin](/plugins/authoring), which includes a `seedFiles` example.

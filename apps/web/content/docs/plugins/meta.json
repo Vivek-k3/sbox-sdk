@@ -1,0 +1,5 @@
+{
+  "root": true,
+  "title": "Plugins",
+  "pages": ["overview", "catalog", "authoring"]
+}

@@ -1,0 +1,10 @@
+---
+title: MCP server (coming soon)
+description: An MCP plugin will expose the sandbox's tools over the Model Context Protocol for any MCP client. Planned.
+---
+
+<Callout type="info">Planned — not shipped yet.</Callout>
+
+An MCP plugin (`kind: "mcp"`) will expose the sandbox's [tools](/ai/tools) over the [Model Context Protocol](https://modelcontextprotocol.io), so any MCP client — Claude Desktop, Cursor, VS Code — can drive the sandbox.
+
+Because the tools come from the same provider-neutral registry the AI providers use, the MCP server projects from exactly the same source. Until it ships, you can reach the tools directly with [`createSandboxTools(sandbox)`](/ai/tools).

@@ -1,20 +1,32 @@
 {
-  "name": "sbox-sdk",
+  "name": "sbox-sdk-monorepo",
   "private": true,
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
-    "lint": "turbo run lint",
-    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
-    "check-types": "turbo run check-types"
+    "test": "turbo run test",
+    "test:coverage": "turbo run test:coverage",
+    "types": "turbo run types",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "turbo run build && changeset publish",
+    "prepare": "husky",
+    "check": "ultracite check",
+    "fix": "ultracite fix",
+    "bump-deps": "npx npm-check-updates --deep -u && pnpm install"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.31.0",
+    "husky": "^9.1.7",
+    "oxfmt": "^0.53.0",
+    "oxlint": "^1.68.0",
     "prettier": "^3.7.4",
     "turbo": "^2.9.18",
-    "typescript": "5.9.2"
+    "typescript": "^6",
+    "ultracite": "7.8.1"
   },
-  "packageManager": "pnpm@9.0.0",
   "engines": {
     "node": ">=18"
-  }
+  },
+  "packageManager": "pnpm@9.0.0"
 }

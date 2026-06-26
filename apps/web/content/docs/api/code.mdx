@@ -1,0 +1,46 @@
+---
+title: code
+description: The code interpreter namespace — run code in a stateful kernel and collect rich results. Gated on the codeInterpreter capability.
+---
+
+`sandbox.code` is **capability-gated** — it's typed `undefined` on providers without a code interpreter (E2B and Cloudflare have it; Vercel and memory don't). Guard before use:
+
+```ts
+if (sandbox.code) {
+  const exec = await sandbox.code.runCode("import numpy as np; print(np.pi)");
+  console.log(exec.logs.stdout);
+}
+```
+
+## Methods
+
+| Method          | Signature                                 |
+| --------------- | ----------------------------------------- |
+| `runCode`       | `(code, opts?) => Promise<CodeExecution>` |
+| `createContext` | `(opts?) => Promise<KernelContext>`       |
+
+`runCode` options: `{ context?, language?, onStdout?, onStderr? }`. Pass a `KernelContext` from `createContext` to keep state across calls (a stateful kernel).
+
+## `CodeExecution`
+
+```ts
+interface CodeExecution {
+  results: RichResult[]; // rich MIME outputs (plots, html, ...)
+  logs: { stdout: string[]; stderr: string[] };
+  error?: { name: string; value: string; traceback?: string };
+}
+
+interface RichResult {
+  mime: Record<string, string>; // e.g. { "image/png": "<base64>" }
+  text?: string;
+}
+```
+
+```ts
+const exec = await sandbox.code.runCode(
+  "import matplotlib.pyplot as plt; plt.plot([1,2,3]); plt.show()"
+);
+for (const r of exec.results) {
+  if (r.mime["image/png"]) save(r.mime["image/png"]);
+}
+```

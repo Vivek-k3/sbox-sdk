@@ -1,0 +1,19 @@
+{
+  "root": true,
+  "title": "General",
+  "pages": [
+    "---Getting Started---",
+    "overview",
+    "installation",
+    "usage",
+    "---Concepts---",
+    "capabilities",
+    "templates",
+    "errors",
+    "escape-hatch",
+    "retries",
+    "---For Agents---",
+    "skills",
+    "llms-txt"
+  ]
+}

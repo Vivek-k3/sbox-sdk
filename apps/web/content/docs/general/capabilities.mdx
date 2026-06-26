@@ -1,0 +1,81 @@
+---
+title: Capabilities
+description: Each provider declares a static capability table. It drives compile-time type gating, a runtime read-model, and fail-fast errors before any network call.
+---
+
+The unified surface is the common shape every adapter implements, but providers differ at the edges: some have a code interpreter, some can pause, some expose ports natively, some only emulate it. sbox SDK makes that difference **declarative and queryable** instead of something you discover by catching an error.
+
+Each provider declares a static `CapabilityMap` — one of three levels per feature:
+
+- `native` — first-class support.
+- `emulated` — supported, but polyfilled by the core (e.g. exec-based filesystem ops).
+- `unsupported` — not available; the sub-API is typed `undefined` and throws before any network call.
+
+## Three layers from one table
+
+A single declaration drives all three of these:
+
+### 1. Compile-time gating
+
+Sub-APIs gated on an `unsupported` capability are typed `undefined`. Calling them is a **compile error**, so whole classes of "this provider can't do that" never reach runtime.
+
+```ts
+// `code` only exists on providers with a code interpreter (e.g. E2B):
+if (sandbox.code) {
+  const exec = await sandbox.code.runCode("import numpy");
+}
+```
+
+### 2. Runtime read-model
+
+Every sandbox and client exposes a frozen `capabilities` read-model:
+
+```ts
+sandbox.capabilities.map.snapshot; // "native" | "emulated" | "unsupported"
+sandbox.capabilities.flags.previewModel; // "subdomain" | "declaredPorts" | ...
+```
+
+### 3. Fail-fast enforcement
+
+Unsupported features throw `NotSupportedError` **synchronously, before any network call** — no wasted round trip, no ambiguous provider error.
+
+## Dynamic narrowing with `can()`
+
+For code that picks a provider at runtime, `sandbox.can(cap)` is a type guard that narrows at both the runtime and type level:
+
+```ts
+if (sandbox.can("snapshot")) {
+  // `sandbox.snapshots` is now non-undefined here.
+  await sandbox.snapshots.create({ name: "ckpt" });
+}
+```
+
+## The capability map
+
+The static table covers 25 capabilities across lifecycle, exec, filesystem, code, network, and snapshots:
+
+| Group          | Capabilities                                                           |
+| -------------- | ---------------------------------------------------------------------- |
+| **lifecycle**  | `list`, `stop`, `pause`, `setTimeout`                                  |
+| **exec**       | `background`, `streaming`, `killProcess`, `pty`, `stdin`               |
+| **filesystem** | `filesWatch`, `filesUpload`                                            |
+| **code**       | `codeInterpreter`, `statefulKernel`                                    |
+| **network**    | `exposePort`, `privatePreview`, `egressControl`, `ssh`, `proxiedFetch` |
+| **snapshot**   | `snapshot`, `fork`, `volumes`                                          |
+| **meta**       | `gpu`, `region`, `secretsVault`, `metrics`                             |
+
+## Behavioral flags
+
+Some differences aren't present/absent — they change semantics. These are `capabilities.flags`:
+
+| Flag                     | Meaning                                                                                 |
+| ------------------------ | --------------------------------------------------------------------------------------- |
+| `preservesMemoryOnPause` | RAM survives a pause                                                                    |
+| `preservesDiskOnStop`    | Disk survives a stop                                                                    |
+| `perCommandEnvCwd`       | If `false`, the core wraps exec in `sh -c 'cd … && KEY=v …'`                            |
+| `exitCodeNative`         | If `false`, the core synthesizes the exit code via a `$?` echo                          |
+| `previewModel`           | How exposed-port URLs are formed (`subdomain`, `declaredPorts`, `wildcardDNS`, `ip`, …) |
+
+## Per-provider matrix
+
+For the full `native` / `emulated` / `unsupported` breakdown across every adapter, see each adapter's **Capabilities** section — [memory](/adapters/memory), [E2B](/adapters/e2b), [Vercel](/adapters/vercel), [Cloudflare](/adapters/cloudflare), [Daytona](/adapters/daytona), [Modal](/adapters/modal), [Fly](/adapters/fly), [AWS Lambda](/adapters/aws-lambda).

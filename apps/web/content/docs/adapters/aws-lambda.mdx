@@ -1,0 +1,74 @@
+---
+title: AWS Lambda MicroVMs
+description: Firecracker-based serverless sandboxes (GA June 2026) with suspend/resume up to 8h. Control plane via @aws-sdk/client-lambda-microvms; you bake a small runner into the image.
+---
+
+## Installation
+
+`@aws-sdk/client-lambda-microvms` is an optional peer dependency, used for the control plane (launch / suspend / resume / terminate). The data plane (exec, files) is plain `fetch` to the microVM's endpoint.
+
+```package-install
+sbox-sdk @aws-sdk/client-lambda-microvms
+```
+
+## How it works
+
+AWS Lambda MicroVMs give you isolation, lifecycle, and a dedicated HTTPS endpoint — but **the in-VM exec/filesystem protocol is defined by your image**. So this adapter speaks a tiny "runner" protocol over the endpoint, and you bake a reference runner into your MicroVM image once.
+
+1. Build a MicroVM image from a `Dockerfile` + the reference runner, upload to S3, and call `CreateMicrovmImage` → note the **image ARN**.
+2. The adapter calls `RunMicrovm` (launch from that ARN), `CreateMicrovmAuthToken` (JWE), then `Suspend`/`Resume`/`Terminate`.
+3. Each op is an HTTPS request to the microVM endpoint with `X-aws-proxy-auth` + `X-aws-proxy-port` headers, routed to the runner's `POST /sbox/exec`, `/sbox/fs/read`, `/sbox/fs/write`.
+
+<Callout type="info">
+  The reference runner (a dependency-free Node server) ships in the package at
+  `sbox-sdk/src/aws-lambda/runner/` — `server.mjs`, `Dockerfile`, and a README
+  with the exact build & `create-microvm-image` commands. The runner runs
+  **inside the isolated MicroVM**; executing arbitrary commands is its purpose.
+</Callout>
+
+## Usage
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { awsLambda } from "sbox-sdk/aws-lambda";
+
+const client = createSandboxClient({
+  provider: awsLambda({
+    imageIdentifier:
+      "arn:aws:lambda:us-east-1:123456789012:microvm-image:sbox-runner",
+    region: "us-east-1",
+  }),
+});
+
+const sandbox = await client.create();
+const res = await sandbox.commands.run("echo hello");
+await sandbox.files.write("/tmp/data.txt", "hi");
+
+await sandbox.pause(); // SuspendMicrovm — memory + disk preserved (up to 8h)
+await sandbox.resume(); // ResumeMicrovm
+await sandbox.destroy(); // TerminateMicrovm
+```
+
+[`template`](/templates) overrides the image ARN per `create()`; otherwise the `imageIdentifier` option is used.
+
+## Options
+
+<AutoTypeTable
+  path="../../packages/sbox-sdk/src/aws-lambda/index.ts"
+  name="AwsLambdaOptions"
+/>
+
+## Capabilities
+
+| Capability          |    Level    | Notes                                |
+| ------------------- | :---------: | ------------------------------------ |
+| `list` / `region`   |   native    |                                      |
+| `pause`             |   native    | `Suspend` preserves memory + disk    |
+| `stop`              | unsupported | only run / suspend / terminate       |
+| `streaming`         |  emulated   | runner returns buffered output       |
+| `filesUpload`       |   native    | via the runner                       |
+| `exposePort`        |   native    | endpoint + `X-aws-proxy-port` + JWE  |
+| `codeInterpreter`   | unsupported |                                      |
+| `snapshot` / `fork` | unsupported | the image is the build-time snapshot |
+
+`preservesMemoryOnPause` is `true`; `previewModel` is `tunnel`.

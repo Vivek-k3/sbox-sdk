@@ -1,0 +1,14 @@
+{
+  "root": true,
+  "title": "Adapters",
+  "pages": [
+    "memory",
+    "e2b",
+    "vercel",
+    "cloudflare",
+    "daytona",
+    "modal",
+    "fly",
+    "aws-lambda"
+  ]
+}

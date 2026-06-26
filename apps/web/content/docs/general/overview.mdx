@@ -1,0 +1,39 @@
+---
+title: Overview
+description: sbox SDK is a unified TypeScript API for agent sandbox providers — one namespaced surface, capability gating, a single error taxonomy, and a typed escape hatch.
+---
+
+## What is sbox SDK?
+
+A single TypeScript API for running code in ephemeral **sandboxes** that works the same way across [E2B](/adapters/e2b), [Vercel Sandbox](/adapters/vercel), [Cloudflare Sandbox](/adapters/cloudflare), [Daytona](/adapters/daytona), [Modal](/adapters/modal), [Fly Machines](/adapters/fly), [AWS Lambda MicroVMs](/adapters/aws-lambda), and an in-memory provider for tests — with more adapters on the way (Northflank, Runloop, CodeSandbox, Morph).
+
+You hold a `Sandbox` and call into a handful of namespaces that cover the surface you actually use:
+
+- `sandbox.commands` — run, spawn, stream, and kill processes.
+- `sandbox.files` — read, write, list, and manage the filesystem.
+- `sandbox.code` — run code in a stateful interpreter (where supported).
+- `sandbox.ports` — expose a port and get a preview URL.
+- `sandbox.snapshots` — checkpoint and restore filesystem state.
+- `sandbox.network` — egress policy and SSH (where supported).
+
+Lifecycle (`getInfo`, `pause`, `resume`, `stop`, `destroy`, `setTimeout`) lives on the sandbox itself. When you need a provider-specific feature outside this surface, drop down to the native client via [`sandbox.raw()`](/escape-hatch), which stays typed per adapter.
+
+## Why sbox SDK?
+
+Every sandbox provider ships its own shape: different process APIs, different filesystem primitives, different error envelopes, different preview-URL models. Switching providers — or supporting more than one — means rewriting the call sites and re-learning the failure model.
+
+sbox SDK collapses that into one client and one error type:
+
+- **One API** — the same `commands` / `files` / `code` calls across every adapter. The code that runs a command on E2B is the code that runs it on Vercel.
+- **Capability gating** — each provider declares a static [capability table](/capabilities). Sub-APIs a provider can't do are typed `undefined` (a compile error), and unsupported features throw `NotSupportedError` _before_ any network call.
+- **Honest exec** — `commands.run()` **never throws on a non-zero exit**. The exit code is data. `await` the handle for a buffered result, or `for await` the same handle to stream output live.
+- **One error taxonomy** — every provider normalizes to [`SandboxError`](/errors) with a small set of codes (`NotFound`, `Unauthorized`, `Timeout`, `NotSupported`, …) and a `retryable` flag.
+- **Lazy SDK loading** — adapters are subpath exports (`sbox-sdk/e2b`, `sbox-sdk/vercel`, …) and each provider SDK is an optional peer dependency, imported lazily on first use. The SDK you don't import is never bundled.
+- **Typed escape hatch** — `sandbox.raw()` is the underlying provider client, typed per adapter, so the unified surface never traps you.
+
+## Next steps
+
+- [Installation](/installation) — install the SDK and your adapter's peer dependency.
+- [Usage](/usage) — construct a client and run the core namespaces.
+- [API reference](/api/client) — the full client, sandbox, and namespace surface.
+- [Adapters](/adapters/memory) — per-provider setup, options, and capability tables.

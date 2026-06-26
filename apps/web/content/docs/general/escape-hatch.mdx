@@ -1,0 +1,37 @@
+---
+title: Escape hatch
+description: Drop down to the native, per-adapter client for any provider feature outside the unified surface — fully typed, no casting.
+---
+
+The unified surface is deliberately small — the namespaces every adapter can implement. When you need a provider feature that isn't part of it, drop down to the native client instead of waiting for it to be wrapped.
+
+## `sandbox.raw()`
+
+`raw()` returns the underlying provider client, **typed per adapter** — the native `Sandbox` from `@e2b/code-interpreter` for `e2b()`, from `@vercel/sandbox` for `vercel()`, from `@cloudflare/sandbox` for `cloudflare()`, and the in-memory store for `memory()`. The type flows through from the adapter, so you keep full autocomplete.
+
+```ts
+import { e2b } from "sbox-sdk/e2b";
+
+const client = createSandboxClient({ provider: e2b({ apiKey }) });
+const sandbox = await client.create();
+
+// Unified path:
+await sandbox.commands.run("echo hi");
+
+// Native E2B client for something we don't model:
+const native = sandbox.raw(); // typed as E2B's Sandbox
+```
+
+## When to reach for it
+
+There are three layers, in order of preference:
+
+1. **Capability-gated sub-APIs** (`sandbox.code`, `.ports`, `.snapshots`, `.network`) — for features that _are_ in the unified model but not on every provider.
+2. **`sandbox.raw()`** — for anything the unified surface doesn't model at all.
+3. **`.raw` on payloads** — `SandboxInfo.raw` and `SnapshotRef.raw` carry the original provider response for those calls.
+
+## The tradeoff
+
+`raw()` is the **intentional exit from the portability promise**. Every `commands` / `files` / gated call site survives an adapter swap unchanged; the moment you call `raw()`, that line of code is pinned to one provider. That's the right tool for a genuinely provider-unique feature — but it's a one-way door for that call site, which is why it's an explicit, named method rather than something you reach by accident.
+
+If you constructed the client with the default dynamically-typed provider, `raw()` is typed `unknown` and you'd cast it yourself. Import a concrete adapter to get the precise native type.

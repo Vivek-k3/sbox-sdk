@@ -1,0 +1,80 @@
+---
+title: Overview
+description: Turn any sandbox into a set of tools your AI agent can call — one plugin shapes sandbox.tools for your framework, capability-gated to the provider and gated by an approval policy.
+---
+
+## Give your agent a sandbox
+
+The AI layer turns a `Sandbox` into tools an LLM can call — run commands, read and write files, execute code, expose ports — shaped for whichever agent framework you use, with a single approval policy you control.
+
+You write the integration once. Pick an **AI-provider plugin**, and the sandbox grows a correctly-typed `sandbox.tools` you hand straight to your framework:
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { e2b } from "sbox-sdk/e2b";
+import { ai } from "sbox-sdk/ai";
+import { aiSdk } from "sbox-sdk/ai-sdk";
+import { generateText } from "ai";
+
+const client = createSandboxClient({
+  provider: e2b({ apiKey: process.env.E2B_API_KEY! }),
+  plugins: [ai({ framework: aiSdk() })],
+});
+
+const sandbox = await client.create({ template: "node" });
+
+// `sandbox.tools` is typed for the AI SDK and already filtered to what E2B supports.
+const result = await generateText({
+  model,
+  prompt: "Create app.js that prints hello, then run it.",
+  tools: sandbox.tools,
+});
+```
+
+The framework you pass to `ai()` **decides the shape** of `sandbox.tools` — a tool map for the AI SDK, an array for OpenAI Agents, runnable tools for Claude. Swap `e2b()` for `vercel()` and the toolset re-shapes itself to the new provider's capabilities, with zero changes to your agent code.
+
+## How it fits together
+
+One provider-neutral tool registry is projected into every framework. You never hand-write the same tools per framework:
+
+```
+   Sandbox ──▶ agent-tools (10 capability-gated tools + policy)
+                     │  projection (shape only)
+        ┌────────────┼─────────────┬──────────────┬───────────────┐
+        ▼            ▼             ▼              ▼               ▼
+     ai-sdk       mastra        openai        anthropic       langchain
+   tool() map  createTool map  tool() array  runnable[]     tool() array
+```
+
+- **[AI providers](/ai/providers)** — install an AI-provider [plugin](/plugins/overview) on the client and `sandbox.tools` is ready to use, typed for your framework.
+- **[Tools](/ai/tools)** — the 10 canonical tools, each mapped to the core `Sandbox` API and gated by the provider's capabilities.
+- **[Approval](/ai/approval)** — one `SandboxPolicy` decides `allow` / `ask` / `deny` per call; each framework maps `ask` to its native human-in-the-loop.
+
+## Two ways to use it
+
+Every framework subpath ships both layers:
+
+1. **Plugin (batteries included)** — `plugins: [ai({ framework: aiSdk() })]` → `sandbox.tools`. The shape follows the framework you pass.
+2. **Standalone function (composable)** — `toAISDKTools(sandbox)` returns the same tools explicitly, for when you want to filter, merge, or build them yourself.
+
+```ts
+import { toAISDKTools } from "sbox-sdk/ai-sdk";
+
+const tools = toAISDKTools(sandbox, {
+  policy: { defaults: { destructive: "ask" } },
+});
+```
+
+## Supported frameworks
+
+All used as `ai({ framework: … })`:
+
+| Framework                           | Subpath              | Adapter          | `sandbox.tools` |
+| ----------------------------------- | -------------------- | ---------------- | --------------- |
+| [Vercel AI SDK](/ai/ai-sdk)         | `sbox-sdk/ai-sdk`    | `aiSdk()`        | tool map        |
+| [Mastra](/ai/mastra)                | `sbox-sdk/mastra`    | `mastra()`       | tool map        |
+| [OpenAI Agents](/ai/openai)         | `sbox-sdk/openai`    | `openaiAgents()` | tool array      |
+| [Anthropic / Claude](/ai/anthropic) | `sbox-sdk/anthropic` | `anthropic()`    | runnable tools  |
+| [LangChain](/ai/langchain)          | `sbox-sdk/langchain` | `langchain()`    | tool array      |
+
+Each framework SDK is an optional peer dependency — install only the one you use.

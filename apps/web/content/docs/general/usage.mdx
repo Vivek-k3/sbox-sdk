@@ -1,0 +1,99 @@
+---
+title: Usage
+description: Construct a client, create a sandbox, and run the core namespaces — commands, files, code, ports, and lifecycle.
+---
+
+## Construct a client
+
+`createSandboxClient()` is the single entry point. Pass a provider adapter, or call it with no arguments for the zero-config in-memory provider — great for tests.
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { e2b } from "sbox-sdk/e2b";
+
+const client = createSandboxClient({
+  provider: e2b({ apiKey: process.env.E2B_API_KEY! }),
+});
+
+const sandbox = await client.create({ template: "python-3.12", ttlMs: 60_000 });
+```
+
+```ts
+// Zero config — defaults to the in-memory provider:
+import { createSandboxClient } from "sbox-sdk";
+
+const sandbox = await createSandboxClient().create();
+await sandbox.commands.run("echo works offline");
+```
+
+## Run commands
+
+`commands.run()` returns an `ExecHandle` that is both a `Promise<ExecResult>` and an `AsyncIterable<OutputEvent>`. `await` it to buffer, or `for await` the same handle to stream.
+
+```ts
+// Buffered — never throws on a non-zero exit; the exit code is data:
+const res = await sandbox.commands.run("npm test", { cwd: "/app" });
+console.log(res.exitCode, res.stdout, res.stderr);
+
+// Streamed — the SAME handle, iterated live:
+for await (const ev of sandbox.commands.run(["python", "train.py"])) {
+  if (ev.type === "stdout") process.stdout.write(ev.data);
+  if (ev.type === "exit") console.log("done", ev.exitCode);
+}
+```
+
+See the [commands reference](/api/commands) for `spawn`, `connect`, `kill`, and `list`.
+
+## Read and write files
+
+Filesystem bodies are web-standard (`string | Uint8Array | ReadableStream`) in, and a `StoredFile` out.
+
+```ts
+await sandbox.files.write("/app/data.json", JSON.stringify({ ok: true }));
+
+const file = await sandbox.files.read("/app/data.json");
+const text = await file.text();
+
+await sandbox.files.mkdir("/app/out", { recursive: true });
+const entries = await sandbox.files.list("/app");
+const there = await sandbox.files.exists("/app/data.json");
+```
+
+See the [files reference](/api/files) for the full method surface.
+
+## Capability-gated namespaces
+
+`code`, `ports`, `snapshots`, and `network` only exist on providers that support them — they're typed `undefined` otherwise, so guard before use.
+
+```ts
+if (sandbox.code) {
+  const exec = await sandbox.code.runCode("print(1 + 1)");
+  console.log(exec.logs.stdout);
+}
+
+if (sandbox.ports) {
+  const preview = await sandbox.ports.expose(3000);
+  console.log(preview.url);
+}
+```
+
+For dynamically-chosen providers, `sandbox.can("snapshot")` narrows at both runtime and the type level:
+
+```ts
+if (sandbox.can("snapshot")) {
+  await sandbox.snapshots.create({ name: "ckpt" });
+}
+```
+
+## Lifecycle and cleanup
+
+```ts
+await sandbox.pause();
+await sandbox.resume();
+await sandbox.setTimeout(120_000);
+
+await sandbox.destroy();
+await client.dispose();
+```
+
+Next: read the [capability model](/capabilities), the [error taxonomy](/errors), or the full [API reference](/api/client).

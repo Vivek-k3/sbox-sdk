@@ -1,0 +1,48 @@
+---
+title: lifecycle
+description: Top-level sandbox lifecycle — getInfo, setTimeout, pause, resume, stop, and destroy. Always present, runtime-gated per provider.
+---
+
+Lifecycle methods live directly on the `Sandbox` (not in a namespace). They are **always present** so the swap-one-import promise holds, but **runtime-gated**: calling one a provider doesn't support throws `NotSupportedError`.
+
+## Methods
+
+| Method       | Signature                          | Capability           |
+| ------------ | ---------------------------------- | -------------------- |
+| `getInfo`    | `() => Promise<SandboxInfo>`       | always               |
+| `setTimeout` | `(ttlMs: number) => Promise<void>` | `setTimeout`         |
+| `pause`      | `() => Promise<void>`              | `pause`              |
+| `resume`     | `() => Promise<void>`              | (pairs with `pause`) |
+| `stop`       | `() => Promise<void>`              | `stop`               |
+| `destroy`    | `() => Promise<void>`              | always               |
+
+```ts
+const info = await sandbox.getInfo();
+info.state; // "running" | "paused" | "stopped" | ...
+
+if (sandbox.can("pause")) {
+  await sandbox.pause();
+  await sandbox.resume();
+}
+
+await sandbox.setTimeout(120_000);
+await sandbox.destroy();
+```
+
+## Pause vs stop semantics
+
+What survives depends on the provider's behavioral flags (see [Capabilities](/capabilities)):
+
+- `preservesMemoryOnPause` — whether RAM survives a `pause()`.
+- `preservesDiskOnStop` — whether disk survives a `stop()`.
+
+For example, E2B preserves memory on pause; Vercel auto-snapshots the filesystem on stop. Check `sandbox.capabilities.flags` to branch on this rather than assuming.
+
+## Cleanup
+
+Always `destroy()` sandboxes you create, and `dispose()` the client when you're done:
+
+```ts
+await sandbox.destroy();
+await client.dispose();
+```

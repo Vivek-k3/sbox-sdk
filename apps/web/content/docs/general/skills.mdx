@@ -1,0 +1,73 @@
+---
+title: Skills
+description: Install the sbox-sdk agent skill so coding agents (Claude Code, Cursor, Codex, Copilot) can set up and use sbox correctly — or paste the setup prompt directly.
+---
+
+## The sbox-sdk skill
+
+`sbox-sdk` ships an **agent skill** — a `SKILL.md` that teaches a coding agent how to install, configure, and use the SDK correctly: picking an adapter, creating a sandbox client, running commands and files, capability gating, the common gotchas, and exposing sandbox tools to an agent framework. It follows the open [skills.sh](https://skills.sh) format and works with Claude Code, Cursor, GitHub Copilot, Gemini, and more.
+
+The skill lives in the repo at [`skills/sbox-sdk/SKILL.md`](https://github.com/vivek-k3/sbox-sdk/blob/main/skills/sbox-sdk/SKILL.md).
+
+## Install
+
+The quickest path is the [skills.sh](https://skills.sh) CLI, which installs into whichever agent you use:
+
+```bash
+npx skills add vivek-k3/sbox-sdk
+```
+
+Or wire it up manually for your agent:
+
+<Tabs items={["Claude Code", "Cursor", "Other agents"]}>
+  <Tab value="Claude Code">
+    Drop the skill into your project (or `~/.claude/skills` for global use):
+
+    ```bash
+    mkdir -p .claude/skills/sbox-sdk
+    curl -o .claude/skills/sbox-sdk/SKILL.md \
+      https://raw.githubusercontent.com/vivek-k3/sbox-sdk/main/skills/sbox-sdk/SKILL.md
+    ```
+
+    Claude Code loads it automatically and activates it when a task involves sandboxes or running code.
+
+  </Tab>
+  <Tab value="Cursor">
+    Save the `SKILL.md` body as a project rule at `.cursor/rules/sbox-sdk.md` (or paste it into **Settings → Rules**), so the setup and usage instructions are in the agent's context.
+  </Tab>
+  <Tab value="Other agents">
+    Any agent with skills or custom-instruction support works — install via `npx skills add vivek-k3/sbox-sdk`, or paste the `SKILL.md` contents into the agent's rules / system prompt.
+  </Tab>
+</Tabs>
+
+## Or just paste a prompt
+
+No skill support? Paste this into your agent to set sbox up in the current project:
+
+```text
+Set up sbox-sdk (https://sbox-sdk.dev) in this project.
+
+1. Install it with the E2B adapter: npm install sbox-sdk @e2b/code-interpreter
+2. Create a client and a sandbox:
+     import { createSandboxClient } from "sbox-sdk";
+     import { e2b } from "sbox-sdk/e2b";
+     const client = createSandboxClient({ provider: e2b({ apiKey: process.env.E2B_API_KEY! }) });
+     const sandbox = await client.create({ template: "node", ttlMs: 60_000 });
+3. Use sandbox.commands.run(cmd) (it never throws on a non-zero exit — read exitCode),
+   sandbox.files.{read,write,list}, and sandbox.code?.runCode(...) where supported.
+   Capability-gated namespaces (code, ports, snapshots, network) are `undefined` when
+   unsupported — guard with `?.` or sandbox.can(cap). Always set a TTL and call
+   sandbox.destroy() when finished.
+
+For exact APIs, fetch https://sbox-sdk.dev/llms.txt and the relevant /llms.mdx/... pages.
+```
+
+To give an agent framework sandbox tools instead of writing glue code, see [AI agent tools](/ai/overview).
+
+## What the skill covers
+
+- Installing the SDK and the right adapter peer dependency.
+- Creating a client and sandbox; the core `commands` / `files` / `code` / `ports` API.
+- The gotchas agents get wrong: [capability gating](/general/capabilities), `commands.run` not throwing on a non-zero exit, optional peer deps, TTLs, and cleanup.
+- Exposing sandbox tools to an agent via the [`ai()` plugin](/ai/providers).
+- Where to fetch exact signatures — [`/llms.txt`](/general/llms-txt) and per-page markdown.

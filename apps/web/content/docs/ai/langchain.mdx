@@ -1,0 +1,79 @@
+---
+title: LangChain
+description: Project sandbox tools into @langchain/core tool() objects as an array for any LangChain agent or LangGraph ToolNode. Use the ai() plugin with the langchain() framework, or toLangChainTools().
+---
+
+## Installation
+
+`@langchain/core` is an optional peer dependency.
+
+```package-install
+sbox-sdk @langchain/core
+```
+
+## Usage
+
+Pass the `langchain()` framework to the `ai()` plugin and `sandbox.tools` is an array of structured tools for any LangChain agent:
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { e2b } from "sbox-sdk/e2b";
+import { ai } from "sbox-sdk/ai";
+import { langchain } from "sbox-sdk/langchain";
+import { ChatOpenAI } from "@langchain/openai";
+import { createReactAgent } from "@langchain/langgraph/prebuilt";
+
+const client = createSandboxClient({
+  provider: e2b({ apiKey: process.env.E2B_API_KEY! }),
+  plugins: [ai({ framework: langchain() })],
+});
+
+const sandbox = await client.create({ template: "node" });
+
+const agent = createReactAgent({
+  llm: new ChatOpenAI({ model: "gpt-4o" }),
+  tools: sandbox.tools, // StructuredToolInterface[]
+});
+
+const result = await agent.invoke({
+  messages: [
+    { role: "user", content: "Create app.js that prints hello, then run it." },
+  ],
+});
+```
+
+You can also bind the tools to a model directly with `model.bindTools(sandbox.tools)`.
+
+## Standalone
+
+```ts
+import { toLangChainTools } from "sbox-sdk/langchain";
+
+const tools = toLangChainTools(sandbox, {
+  only: ["sbox_exec", "sbox_fs_read"],
+});
+```
+
+`toLangChainTools` accepts a live `Sandbox` or a pre-built `ToolSpec[]`.
+
+## Approval
+
+This adapter enforces the [policy](/ai/approval) inside the tool function via `policy.onApprovalRequest` — `deny` short-circuits, `ask` awaits your callback:
+
+```ts
+plugins: [
+  langchain({
+    policy: {
+      defaults: { destructive: "ask" },
+      onApprovalRequest: async (req) => askUser(req.title),
+    },
+  }),
+];
+```
+
+For graph-native human-in-the-loop, wrap the call in a LangGraph `interrupt()`.
+
+## Notes
+
+- Peer range: `@langchain/core@>=0.3` (Zod 4 supported).
+- The only required peer is `@langchain/core`; agent runtimes like `@langchain/langgraph` and model packages are yours to choose.

@@ -1,0 +1,74 @@
+---
+title: Mastra
+description: Project sandbox tools into Mastra's createTool() shape, keyed by id for an Agent. Use the ai() plugin with the mastra() framework, or the standalone toMastraTools().
+---
+
+## Installation
+
+`@mastra/core` is an optional peer dependency. Use **version 1 or later** — older `0.10.x` releases pin Zod 3 and AI SDK 4 and are incompatible.
+
+```package-install
+sbox-sdk @mastra/core
+```
+
+## Usage
+
+Pass the `mastra()` framework to the `ai()` plugin and `sandbox.tools` is a tool map you register on an `Agent`:
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { e2b } from "sbox-sdk/e2b";
+import { ai } from "sbox-sdk/ai";
+import { mastra } from "sbox-sdk/mastra";
+import { Agent } from "@mastra/core/agent";
+import { openai } from "@ai-sdk/openai";
+
+const client = createSandboxClient({
+  provider: e2b({ apiKey: process.env.E2B_API_KEY! }),
+  plugins: [ai({ framework: mastra() })],
+});
+
+const sandbox = await client.create({ template: "node" });
+
+const agent = new Agent({
+  name: "coder",
+  instructions: "You write and run code in a sandbox.",
+  model: openai("gpt-4o"),
+  tools: sandbox.tools, // Record<string, Tool>, keyed by tool id
+});
+
+const res = await agent.generate(
+  "Create app.js that prints hello, then run it."
+);
+```
+
+## Standalone
+
+```ts
+import { toMastraTools } from "sbox-sdk/mastra";
+
+const tools = toMastraTools(sandbox, { only: ["sbox_exec", "sbox_fs_read"] });
+```
+
+`toMastraTools` accepts a live `Sandbox` or a pre-built `ToolSpec[]`.
+
+## Approval
+
+Mastra has native suspend/resume, but for v1 this adapter enforces the [policy](/ai/approval) inside `execute` via `policy.onApprovalRequest`, consistent with the other adapters — `deny` short-circuits, `ask` awaits your callback:
+
+```ts
+plugins: [
+  ai({
+    framework: mastra(),
+    policy: {
+      defaults: { destructive: "ask" },
+      onApprovalRequest: async (req) => askUser(req.title),
+    },
+  }),
+];
+```
+
+## Notes
+
+- Peer range: `@mastra/core@^1`.
+- Mastra is built on the AI SDK and also accepts [AI SDK tools](/ai/ai-sdk) directly, so `ai({ framework: aiSdk() })` output works in a Mastra agent too. The native adapter is preferred for Mastra-native registration.

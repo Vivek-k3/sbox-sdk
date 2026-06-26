@@ -1,0 +1,17 @@
+{
+  "root": true,
+  "title": "AI",
+  "pages": [
+    "---Overview---",
+    "overview",
+    "providers",
+    "tools",
+    "approval",
+    "---Frameworks---",
+    "ai-sdk",
+    "mastra",
+    "openai",
+    "anthropic",
+    "langchain"
+  ]
+}

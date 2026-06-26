@@ -1,0 +1,63 @@
+---
+title: Retries & fallback
+description: The client retries retryable failures with backoff and can fall back across providers — guarded by an idempotency key so a retry never orphans a second sandbox.
+---
+
+`createSandboxClient` owns retry and provider fallback. Both are driven by the [`retryable`](/errors) flag on `SandboxError`.
+
+## Retry policy
+
+By default the client retries up to twice (3 attempts total) on retryable errors, with exponential backoff. Override per-client:
+
+```ts
+const client = createSandboxClient({
+  provider: e2b({ apiKey }),
+  retry: {
+    retries: 4,
+    delayMs: (attempt) => attempt * 250,
+    shouldRetry: (err) => isRetryableError(err),
+  },
+});
+```
+
+## Provider fallback
+
+Supply a `fallback` chain and the client will try the next provider when one fails:
+
+```ts
+const client = createSandboxClient({
+  provider: e2b({ apiKey }),
+  fallback: [vercel({ token, teamId, projectId })],
+});
+```
+
+Fallback engages **only when you pass an `idempotencyKey`** on the create spec. This is deliberate: without a stable key, a create that failed _after_ spawning a VM could leave an orphan when the client moves to the next provider. The key makes the operation safe to re-attempt.
+
+```ts
+const sandbox = await client.create({
+  idempotencyKey: "build-job-42",
+});
+```
+
+If every provider in the chain fails, the client throws `AllProvidersFailedError` with the per-provider `attempts[]`.
+
+## Hooks
+
+Observe the lifecycle with hooks — handy for logging which provider served a request, or recording retry attempts:
+
+```ts
+const client = createSandboxClient({
+  provider: e2b({ apiKey }),
+  hooks: {
+    beforeCreate: (spec) => {
+      /* ... */
+    },
+    afterCreate: ({ id, provider }) => {
+      /* ... */
+    },
+    onError: (err, attempt) => {
+      /* ... */
+    },
+  },
+});
+```

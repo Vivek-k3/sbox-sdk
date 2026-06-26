@@ -1,0 +1,93 @@
+---
+title: Writing a plugin
+description: Build a custom plugin with the SandboxPlugin interface — graft typed properties onto the sandbox, run setup on create, and clean up on destroy.
+---
+
+## The interface
+
+A plugin is a plain object implementing `SandboxPlugin`, imported from `sbox-sdk`. Give it a `name`, then implement any of `extend`, `onCreate`, and `onDestroy`.
+
+```ts
+import type { SandboxPlugin } from "sbox-sdk";
+```
+
+## A lifecycle plugin: seed every sandbox
+
+`onCreate` runs once the sandbox is built and is awaited before `create()` resolves — ideal for bootstrapping. This plugin writes a set of files into every sandbox:
+
+```ts
+import type { SandboxPlugin } from "sbox-sdk";
+
+export function seedFiles(files: Record<string, string>): SandboxPlugin {
+  return {
+    name: "seed-files",
+    kind: "lifecycle",
+    onCreate: async (sandbox) => {
+      for (const [path, content] of Object.entries(files)) {
+        await sandbox.files.write(path, content);
+      }
+    },
+  };
+}
+```
+
+```ts
+const client = createSandboxClient({
+  provider: e2b(),
+  plugins: [
+    seedFiles({
+      "/app/package.json": "{}",
+      "/app/.env": "NODE_ENV=development",
+    }),
+  ],
+});
+
+const sandbox = await client.create(); // both files already exist
+```
+
+## An `extend` plugin: graft a typed property
+
+`extend` returns properties merged onto the sandbox — synchronously, so they're available immediately. Type the contribution with the `Ext` parameter and it shows up on the sandbox type. This is exactly how the [AI-provider plugins](/ai/providers) add `sandbox.tools`:
+
+```ts
+import type { SandboxPlugin } from "sbox-sdk";
+
+function withMeta(meta: {
+  project: string;
+}): SandboxPlugin<{ meta: typeof meta }> {
+  return {
+    name: "with-meta",
+    extend: () => ({ meta }),
+  };
+}
+
+const client = createSandboxClient({
+  provider: e2b(),
+  plugins: [withMeta({ project: "demo" })],
+});
+
+const sandbox = await client.create();
+sandbox.meta.project; // typed as string
+```
+
+## Cleanup with `onDestroy`
+
+`onDestroy` runs before the sandbox is torn down — flush logs, close connections, stop anything `onCreate` started:
+
+```ts
+function auditLog(sink: (line: string) => void): SandboxPlugin {
+  return {
+    name: "audit-log",
+    kind: "middleware",
+    onCreate: (sandbox) => sink(`created ${sandbox.id}`),
+    onDestroy: (sandbox) => sink(`destroyed ${sandbox.id}`),
+  };
+}
+```
+
+## Notes
+
+- **Hooks are optional** — a plugin can implement just one. `extend` is synchronous; `onCreate` / `onDestroy` may be async and are awaited.
+- **`kind` is a hint** — set it to the category your plugin fits. The client allows at most one `ai-provider` plugin; every other kind stacks freely.
+- **Plugins apply everywhere** — every sandbox from `create()`, `connect()`, and `fork()` runs your plugin's `extend`.
+- **Per-`create` options** — the second argument to `client.create(spec, options)` reaches your hooks as `ctx.createOptions`, so a plugin can read per-sandbox configuration.

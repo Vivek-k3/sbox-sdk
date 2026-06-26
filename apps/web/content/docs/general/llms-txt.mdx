@@ -1,0 +1,22 @@
+---
+title: llms.txt
+description: The docs are available as plain markdown for LLMs — an llms.txt index, a full-text bundle, and any page as markdown. Feed them to ChatGPT, Claude, Cursor, or your own agent.
+---
+
+Every page of these docs is available as clean markdown, plus two aggregate files following the [llms.txt](https://llmstxt.org) convention — so you can give an LLM accurate, current context about sbox SDK instead of letting it guess.
+
+## Endpoints
+
+| URL                                | What it is                                                                                                       |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| [`/llms.txt`](/llms.txt)           | An index of every doc page, with links and one-line descriptions.                                                |
+| [`/llms-full.txt`](/llms-full.txt) | The entire documentation concatenated into one markdown file.                                                    |
+| `/llms.mdx/<path>`                 | Any single page as markdown — append the page's path, e.g. [`/llms.mdx/general/usage`](/llms.mdx/general/usage). |
+
+## Using it
+
+- **In a chat (ChatGPT, Claude):** paste `https://sbox-sdk.dev/llms.txt` and ask the model to read the index, then fetch the pages it needs — or paste `https://sbox-sdk.dev/llms-full.txt` to load everything at once.
+- **In an editor agent (Cursor, Copilot):** add `https://sbox-sdk.dev/llms.txt` as a documentation source.
+- **From any page:** fetch its markdown by prefixing the path with `/llms.mdx` (this page is at `/llms.mdx/general/llms-txt`).
+
+For a guided, hands-off setup, the [sbox-sdk skill](/general/skills) packages these instructions for coding agents.

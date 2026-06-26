@@ -1,0 +1,68 @@
+---
+title: Tools
+description: The 10 canonical sandbox tools, each mapped to the core Sandbox API and gated by the provider's capabilities. Authored once, projected into every framework.
+---
+
+## The canonical tools
+
+Every adapter projects from the same provider-neutral registry. There are ten tools, each mapped to a real `Sandbox` operation:
+
+| Tool               | Maps to                                                            |     Always present?     | Risk        |
+| ------------------ | ------------------------------------------------------------------ | :---------------------: | ----------- |
+| `sbox_exec`        | `commands.run`                                                     |           yes           | mutating    |
+| `sbox_run_code`    | `code.runCode`                                                     | needs `codeInterpreter` | mutating    |
+| `sbox_fs_read`     | `files.read`                                                       |           yes           | safe        |
+| `sbox_fs_write`    | `files.write`                                                      |           yes           | mutating    |
+| `sbox_fs_list`     | `files.list`                                                       |           yes           | safe        |
+| `sbox_fs_remove`   | `files.remove`                                                     |           yes           | destructive |
+| `sbox_expose_port` | `ports.expose`                                                     |   needs `exposePort`    | mutating    |
+| `sbox_snapshot`    | `snapshots.*`                                                      |    needs `snapshot`     | per-action  |
+| `sbox_lifecycle`   | `getInfo` / `setTimeout` / `stop` / `pause` / `resume` / `destroy` |           yes           | per-action  |
+| `sbox_set_egress`  | `network.setEgressPolicy`                                          |  needs `egressControl`  | mutating    |
+
+`sbox_snapshot` and `sbox_lifecycle` fold several verbs behind one `action` argument to keep the tool count low (too many tools degrades model selection). Their risk is refined per action — `sbox_lifecycle` with `action: "getInfo"` is `safe`, with `action: "destroy"` is `destructive`.
+
+The [`risk`](/ai/approval) class drives the default approval posture.
+
+## Capability gating
+
+A tool only exists if the provider can do it. `createSandboxTools` filters the set against the sandbox's [capabilities](/general/capabilities):
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { memory } from "sbox-sdk/testing";
+import { createSandboxTools } from "sbox-sdk/agent-tools";
+
+const sandbox = await createSandboxClient({ provider: memory() }).create();
+
+createSandboxTools(sandbox).map((t) => t.name);
+// in-memory provider has no code interpreter or egress control, so:
+// → sbox_exec, sbox_fs_read, sbox_fs_write, sbox_fs_list, sbox_fs_remove,
+//   sbox_expose_port, sbox_snapshot, sbox_lifecycle
+// (sbox_run_code and sbox_set_egress are absent)
+```
+
+This is why `sandbox.tools` from an [AI-provider plugin](/ai/providers) automatically reflects the provider: a richer provider exposes more tools, with no change to your code.
+
+## The neutral registry
+
+`createSandboxTools` returns a provider- and framework-agnostic `ToolSpec[]` — the input every framework adapter projects from. You rarely need it directly (the plugins and `toXTools` functions call it for you), but it's there when you want to filter, inspect, or build a custom integration:
+
+```ts
+import { createSandboxTools } from "sbox-sdk/agent-tools";
+
+const specs = createSandboxTools(sandbox, {
+  only: ["sbox_exec", "sbox_fs_read", "sbox_fs_write"],
+  policy: { forbid: ["sbox_fs_remove"] },
+});
+```
+
+Each `ToolSpec` carries a `name`, a model-facing `description`, a Zod `inputSchema`, a `risk` class, and an `execute` that validates its input and **never throws** for a tool-level failure — it returns a result the model can read and react to.
+
+## Results
+
+Tools return their output to the model as text. A failure (a non-zero command, a missing file, a denied call) comes back as a readable message rather than an exception, so the agent loop keeps going and the model can recover.
+
+## Excluded operations
+
+A few `Sandbox` operations are deliberately **not** tools because their results can't be serialized to a model: `snapshots.fork` (returns new `Sandbox` objects), `ports.fetch` (returns a `Response`), and raw streaming process handles. Reach for those through the typed [escape hatch](/general/escape-hatch) or the core API directly.

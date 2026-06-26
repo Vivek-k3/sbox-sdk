@@ -1,0 +1,67 @@
+---
+title: In-Memory
+description: An in-memory sandbox backed by Maps — the zero-config default and the conformance fixture. No dependencies, no network, non-persistent. Ideal for tests.
+---
+
+## Installation
+
+The in-memory adapter has no peer dependencies and no runtime requirements — it's pure JavaScript backed by `Map`s, so it runs unchanged in Node, Bun, Deno, the browser, and edge runtimes. It's built in and is the zero-config default for `createSandboxClient()`.
+
+```package-install
+sbox-sdk
+```
+
+## Usage
+
+The in-memory provider implements the same adapter contract as every cloud provider, but stores files and runs a tiny built-in shell in process instead of touching a network. That makes it the near-universal choice for testing code that uses sbox SDK without standing up a real sandbox — and it doubles as the reference adapter for the [conformance suite](/capabilities).
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { memory } from "sbox-sdk/memory";
+
+// A fresh, empty sandbox. Same surface as the cloud adapters,
+// so you can swap it in for tests without changing any call sites.
+const client = createSandboxClient({ provider: memory() });
+const sandbox = await client.create();
+
+await sandbox.files.write("/app/hello.txt", "hi");
+const text = await (await sandbox.files.read("/app/hello.txt")).text(); // "hi"
+
+const res = await sandbox.commands.run("echo hi", { cwd: "/app" });
+res.exitCode; // 0
+```
+
+### Exercising the filesystem polyfills
+
+Pass `bareFs: true` to hide the native filesystem methods, forcing the core's exec-based polyfills (`ls`, `mkdir`, `rm`, `mv`, `stat`) to run instead — useful for testing how the core behaves against providers that have no native fs primitives.
+
+```ts
+import { memory } from "sbox-sdk/memory";
+
+const client = createSandboxClient({ provider: memory({ bareFs: true }) });
+```
+
+## Options
+
+<AutoTypeTable
+  path="../../packages/sbox-sdk/src/memory/index.ts"
+  name="MemoryOptions"
+/>
+
+## Behavior notes
+
+- **Non-persistent.** State lives in the process. Two clients built from separate `memory()` calls don't share data. Not for production.
+- **Built-in mini-shell.** `commands.run` interprets a small set of POSIX commands (`echo`, `cat`, `ls`, `mkdir`, `rm`, `mv`, `stat`, `env`, …). It is not a full shell — there's no `&&`, pipes, or subshells.
+- **The `raw()` escape hatch** is the backing in-memory store, so a test can read or reset it directly.
+
+## Capabilities
+
+| Capability                                 |    Level    | Notes                                                   |
+| ------------------------------------------ | :---------: | ------------------------------------------------------- |
+| `list` / `stop` / `pause` / `setTimeout`   |   native    | `setTimeout` is a no-op (memory sandboxes never expire) |
+| `background` / `streaming` / `killProcess` |   native    |                                                         |
+| `filesUpload`                              |   native    | string / `Uint8Array` only — no stream upload           |
+| `exposePort`                               |  emulated   | returns a `127.0.0.1` preview URL                       |
+| `snapshot` / `fork`                        |   native    | in-process copies of the file map                       |
+| `codeInterpreter` / `statefulKernel`       | unsupported | `sandbox.code` is `undefined`                           |
+| `egressControl` / `ssh` / `proxiedFetch`   | unsupported |                                                         |

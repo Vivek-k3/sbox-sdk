@@ -1,0 +1,14 @@
+{
+  "root": true,
+  "title": "API",
+  "pages": [
+    "client",
+    "sandbox",
+    "commands",
+    "files",
+    "code",
+    "ports",
+    "snapshots",
+    "lifecycle"
+  ]
+}

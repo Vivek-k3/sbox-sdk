@@ -1,0 +1,54 @@
+---
+title: Vercel Sandbox
+description: Vercel Sandbox via @vercel/sandbox — exec-emulation, native ports, and a filesystem that is auto-snapshotted on stop. No code interpreter.
+---
+
+## Installation
+
+`@vercel/sandbox` is an optional peer dependency of `sbox-sdk`, loaded lazily on first use.
+
+```package-install
+sbox-sdk @vercel/sandbox
+```
+
+## Usage
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { vercel } from "sbox-sdk/vercel";
+
+const client = createSandboxClient({
+  provider: vercel({
+    token: process.env.VERCEL_TOKEN!,
+    teamId: process.env.VERCEL_TEAM_ID!,
+    projectId: process.env.VERCEL_PROJECT_ID!,
+  }),
+});
+
+const sandbox = await client.create({ template: "node22", ports: [3000] });
+const preview = await sandbox.ports.expose(3000);
+console.log(preview.url);
+```
+
+[`template`](/templates) maps to Vercel's `runtime` selector (e.g. `"node22"`), not an arbitrary image. Vercel has no code interpreter, so `sandbox.code` is `undefined`.
+
+## Options
+
+<AutoTypeTable
+  path="../../packages/sbox-sdk/src/vercel/index.ts"
+  name="VercelOptions"
+/>
+
+## Capabilities
+
+| Capability                               |    Level    | Notes                         |
+| ---------------------------------------- | :---------: | ----------------------------- |
+| `background` / `streaming`               |   native    |                               |
+| `filesUpload`                            |   native    |                               |
+| `exposePort`                             |   native    | preview via declared ports    |
+| `list` / `stop` / `pause` / `setTimeout` | unsupported |                               |
+| `killProcess`                            | unsupported |                               |
+| `codeInterpreter` / `statefulKernel`     | unsupported | `sandbox.code` is `undefined` |
+| `snapshot` / `fork`                      | unsupported |                               |
+
+`preservesDiskOnStop` is `true` — `stop()` auto-snapshots the filesystem. `previewModel` is `declaredPorts`.

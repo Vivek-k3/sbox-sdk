@@ -1,0 +1,91 @@
+---
+title: Anthropic / Claude
+description: Project sandbox tools into the Anthropic SDK's runnable-tool shape. One array works with both the toolRunner auto-loop and a manual messages.create loop. Use the ai() plugin with the anthropic() framework, or toAnthropicTools().
+---
+
+## Installation
+
+`@anthropic-ai/sdk` is an optional peer dependency.
+
+```package-install
+sbox-sdk @anthropic-ai/sdk
+```
+
+## Usage
+
+Pass the `anthropic()` framework to the `ai()` plugin and `sandbox.tools` is an array of runnable Claude tools. The simplest path is the beta `toolRunner`, which runs the whole tool loop for you:
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { e2b } from "sbox-sdk/e2b";
+import { ai } from "sbox-sdk/ai";
+import { anthropic } from "sbox-sdk/anthropic";
+import Anthropic from "@anthropic-ai/sdk";
+
+const client = createSandboxClient({
+  provider: e2b({ apiKey: process.env.E2B_API_KEY! }),
+  plugins: [ai({ framework: anthropic() })],
+});
+
+const sandbox = await client.create({ template: "node" });
+const claude = new Anthropic();
+
+const message = await claude.beta.messages.toolRunner({
+  model: "claude-sonnet-4-5",
+  max_tokens: 1024,
+  messages: [
+    { role: "user", content: "Create app.js that prints hello, then run it." },
+  ],
+  tools: sandbox.tools,
+});
+```
+
+## One array, both loops
+
+Each tool is a _runnable tool_ — it is both a tool definition and an executor — so the same `sandbox.tools` array also works with a manual `messages.create` loop:
+
+```ts
+const res = await claude.beta.messages.create({
+  model,
+  max_tokens,
+  messages,
+  tools: sandbox.tools,
+});
+
+for (const block of res.content) {
+  if (block.type === "tool_use") {
+    const tool = sandbox.tools.find((t) => t.name === block.name)!;
+    const output = await tool.run(tool.parse(block.input));
+    // append a tool_result block with `output`, then continue the conversation
+  }
+}
+```
+
+## Standalone
+
+```ts
+import { toAnthropicTools } from "sbox-sdk/anthropic";
+
+const tools = toAnthropicTools(sandbox, {
+  only: ["sbox_exec", "sbox_fs_read"],
+});
+```
+
+## Approval
+
+Claude has no native human-in-the-loop, so this adapter enforces the [policy](/ai/approval) inside each tool's `run`: a `deny` decision short-circuits, and `ask` awaits `policy.onApprovalRequest` when configured. Both return a message Claude reads.
+
+```ts
+plugins: [
+  anthropic({
+    policy: {
+      defaults: { destructive: "ask" },
+      onApprovalRequest: async (req) => askUser(req.title),
+    },
+  }),
+];
+```
+
+## Notes
+
+- Peer range: `@anthropic-ai/sdk@>=0.40`. The runnable tools use the SDK's beta tool helpers.

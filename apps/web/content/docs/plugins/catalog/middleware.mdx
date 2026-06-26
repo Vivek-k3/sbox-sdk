@@ -1,0 +1,14 @@
+---
+title: Middleware (coming soon)
+description: Middleware plugins will wrap tool and command calls for audit, redaction, and metrics. Planned — build your own today.
+---
+
+<Callout type="info">Planned — not shipped yet.</Callout>
+
+Middleware plugins (`kind: "middleware"`) will wrap tool and command calls to add cross-cutting behavior without touching the tools themselves:
+
+- **Audit** — record every call, with its [approval decision](/ai/approval), to your logger or store.
+- **Redaction** — strip secrets from tool inputs and outputs before they reach the model.
+- **Metrics** — emit timing and usage counters per tool.
+
+You can build any of these today — see [Writing a plugin](/plugins/authoring).

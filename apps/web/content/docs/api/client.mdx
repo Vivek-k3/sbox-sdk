@@ -1,0 +1,53 @@
+---
+title: Client
+description: createSandboxClient is the single entry point — it owns provider selection, idempotency-aware retry and fallback, lifecycle hooks, and disposal.
+---
+
+## `createSandboxClient(options?)`
+
+The single entry point. Pass a provider adapter, or call with no arguments for the zero-config in-memory provider.
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { e2b } from "sbox-sdk/e2b";
+
+const client = createSandboxClient({
+  provider: e2b({ apiKey: process.env.E2B_API_KEY! }),
+});
+```
+
+### Options
+
+| Option            | Type                      | Default            | Purpose                                                  |
+| ----------------- | ------------------------- | ------------------ | -------------------------------------------------------- |
+| `provider`        | `SandboxProvider`         | in-memory          | The adapter to route to                                  |
+| `fallback`        | `SandboxProvider[]`       | `[]`               | Backup providers — engages only with an `idempotencyKey` |
+| `retry`           | `RetryPolicy`             | `{ retries: 2 }`   | `retries`, `delayMs`, `shouldRetry`                      |
+| `hooks`           | `Hooks`                   | —                  | `beforeCreate`, `afterCreate`, `onError`                 |
+| `fetch`           | `typeof fetch`            | `globalThis.fetch` | Injectable transport (test seam)                         |
+| `emulate`         | `(keyof CapabilityMap)[]` | —                  | Opt-in lossy emulations                                  |
+| `defaultMetadata` | `Record<string, string>`  | —                  | Merged into every `create`                               |
+
+See [Retries & fallback](/retries) for `retry`, `fallback`, and `hooks` in depth.
+
+## `SandboxClient`
+
+The object returned by `createSandboxClient`.
+
+| Member         | Signature                                             | Notes                                               |
+| -------------- | ----------------------------------------------------- | --------------------------------------------------- |
+| `create`       | `(spec?: SandboxSpec) => Promise<Sandbox>`            | Idempotency-aware; retries + fallback               |
+| `connect`      | `(id: string) => Promise<Sandbox>`                    | Reattach to an existing sandbox                     |
+| `list`         | `(filter?: ListFilter) => AsyncIterable<SandboxInfo>` | Throws `NotSupported` if the provider has no `list` |
+| `provider`     | `string`                                              | Active provider name (readonly)                     |
+| `capabilities` | `Capabilities`                                        | `{ map, flags }` read-model (readonly)              |
+| `dispose`      | `() => Promise<void>`                                 | Release provider resources                          |
+
+## `SandboxSpec`
+
+The shape passed to `create()`. `template` is mapped per-adapter — see [Templates](/templates).
+
+<AutoTypeTable
+  path="../../packages/sbox-sdk/src/internal/types.ts"
+  name="SandboxSpec"
+/>

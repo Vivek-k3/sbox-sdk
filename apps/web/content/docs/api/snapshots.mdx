@@ -1,0 +1,38 @@
+---
+title: snapshots
+description: Checkpoint and restore sandbox state, fork a sandbox, and manage snapshot refs. Gated on the snapshot capability.
+---
+
+`sandbox.snapshots` is **capability-gated** on `snapshot` — native on E2B and the in-memory provider; unsupported on Vercel and Cloudflare. Guard before use:
+
+```ts
+if (sandbox.snapshots) {
+  const ref = await sandbox.snapshots.create({ name: "ckpt" });
+  // ... mutate ...
+  await sandbox.snapshots.restore(ref);
+}
+```
+
+Snapshots are _runtime_ checkpoints, distinct from the build-time [`template`](/templates).
+
+## Methods
+
+| Method    | Signature                                       | Notes                          |
+| --------- | ----------------------------------------------- | ------------------------------ |
+| `create`  | `({ name? }) => Promise<SnapshotRef>`           |                                |
+| `restore` | `(ref: SnapshotRef \| string) => Promise<void>` |                                |
+| `fork`    | `(count?) => Promise<Sandbox[]>`                | Gated on the `fork` capability |
+| `list`    | `() => Promise<SnapshotRef[]>`                  |                                |
+| `delete`  | `(ref: SnapshotRef \| string) => Promise<void>` |                                |
+
+## `SnapshotRef`
+
+```ts
+interface SnapshotRef {
+  id: string;
+  name?: string;
+  provider: string;
+  createdAt?: Date;
+  raw: unknown; // the original provider payload
+}
+```

@@ -1,0 +1,188 @@
+{
+  "name": "sbox-sdk",
+  "version": "0.0.1",
+  "description": "One unified SDK for agent sandbox providers (E2B, Vercel, Cloudflare, Daytona, Modal, and more) — swap the adapter import, keep your code.",
+  "keywords": [
+    "agent",
+    "ai",
+    "cloudflare-sandbox",
+    "code-interpreter",
+    "daytona",
+    "e2b",
+    "sandbox",
+    "vercel-sandbox"
+  ],
+  "license": "MIT",
+  "bin": {
+    "sbox": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "src/aws-lambda/runner",
+    "README.md"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./adapter": {
+      "types": "./dist/adapter/index.d.ts",
+      "import": "./dist/adapter/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js"
+    },
+    "./conformance": {
+      "types": "./dist/conformance/index.d.ts",
+      "import": "./dist/conformance/index.js"
+    },
+    "./memory": {
+      "types": "./dist/memory/index.d.ts",
+      "import": "./dist/memory/index.js"
+    },
+    "./agent-tools": {
+      "types": "./dist/agent-tools/index.d.ts",
+      "import": "./dist/agent-tools/index.js"
+    },
+    "./ai": {
+      "types": "./dist/ai/index.d.ts",
+      "import": "./dist/ai/index.js"
+    },
+    "./ai-sdk": {
+      "types": "./dist/ai-sdk/index.d.ts",
+      "import": "./dist/ai-sdk/index.js"
+    },
+    "./mastra": {
+      "types": "./dist/mastra/index.d.ts",
+      "import": "./dist/mastra/index.js"
+    },
+    "./openai": {
+      "types": "./dist/openai/index.d.ts",
+      "import": "./dist/openai/index.js"
+    },
+    "./anthropic": {
+      "types": "./dist/anthropic/index.d.ts",
+      "import": "./dist/anthropic/index.js"
+    },
+    "./langchain": {
+      "types": "./dist/langchain/index.d.ts",
+      "import": "./dist/langchain/index.js"
+    },
+    "./e2b": {
+      "types": "./dist/e2b/index.d.ts",
+      "import": "./dist/e2b/index.js"
+    },
+    "./cloudflare": {
+      "types": "./dist/cloudflare/index.d.ts",
+      "import": "./dist/cloudflare/index.js"
+    },
+    "./vercel": {
+      "types": "./dist/vercel/index.d.ts",
+      "import": "./dist/vercel/index.js"
+    },
+    "./daytona": {
+      "types": "./dist/daytona/index.d.ts",
+      "import": "./dist/daytona/index.js"
+    },
+    "./modal": {
+      "types": "./dist/modal/index.d.ts",
+      "import": "./dist/modal/index.js"
+    },
+    "./fly": {
+      "types": "./dist/fly/index.d.ts",
+      "import": "./dist/fly/index.js"
+    },
+    "./aws-lambda": {
+      "types": "./dist/aws-lambda/index.d.ts",
+      "import": "./dist/aws-lambda/index.js"
+    }
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.json && chmod +x dist/cli.js",
+    "check-types": "tsgo -p tsconfig.json --noEmit",
+    "types": "tsgo -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepack": "pnpm run build"
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^0.69.0",
+    "@aws-sdk/client-lambda": "^3.1075.0",
+    "@aws-sdk/client-lambda-microvms": "^3.1075.0",
+    "@aws-sdk/client-s3": "^3.1075.0",
+    "@cloudflare/sandbox": "^0.12.1",
+    "@daytonaio/sdk": "^0.191.0",
+    "@e2b/code-interpreter": "^2.6.1",
+    "@langchain/core": "^0.3.0",
+    "@mastra/core": "^1.46.0",
+    "@openai/agents": "^0.12.0",
+    "@sbox-sdk/config": "workspace:*",
+    "@types/node": "^25.9.1",
+    "@typescript/native-preview": "7.0.0-dev.20260624.1",
+    "@vercel/sandbox": "^2.2.1",
+    "ai": "^5.0.0",
+    "modal": "^0.8.1",
+    "typescript": "5.9.2",
+    "vitest": "^3.2.4",
+    "zod": "^4.0.0"
+  },
+  "peerDependencies": {
+    "@anthropic-ai/sdk": ">=0.40.0",
+    "@aws-sdk/client-lambda-microvms": "*",
+    "@cloudflare/sandbox": "*",
+    "@daytonaio/sdk": "*",
+    "@e2b/code-interpreter": "*",
+    "@langchain/core": ">=0.3.0",
+    "@mastra/core": "^1.0.0",
+    "@openai/agents": ">=0.12.0",
+    "@vercel/sandbox": "*",
+    "ai": "^5.0.0 || ^6.0.0",
+    "modal": "*",
+    "zod": "^3.25.0 || ^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@aws-sdk/client-lambda-microvms": {
+      "optional": true
+    },
+    "@cloudflare/sandbox": {
+      "optional": true
+    },
+    "@daytonaio/sdk": {
+      "optional": true
+    },
+    "@e2b/code-interpreter": {
+      "optional": true
+    },
+    "modal": {
+      "optional": true
+    },
+    "@vercel/sandbox": {
+      "optional": true
+    },
+    "zod": {
+      "optional": true
+    },
+    "ai": {
+      "optional": true
+    },
+    "@mastra/core": {
+      "optional": true
+    },
+    "@openai/agents": {
+      "optional": true
+    },
+    "@anthropic-ai/sdk": {
+      "optional": true
+    },
+    "@langchain/core": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

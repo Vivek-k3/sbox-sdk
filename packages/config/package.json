@@ -1,0 +1,6 @@
+{
+  "name": "@sbox-sdk/config",
+  "version": "0.0.1",
+  "private": true,
+  "description": "SBox SDK Configuration"
+}

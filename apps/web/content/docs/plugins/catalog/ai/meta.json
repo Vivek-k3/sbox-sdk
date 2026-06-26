@@ -1,0 +1,11 @@
+{
+  "title": "AI",
+  "defaultOpen": true,
+  "pages": [
+    "[Vercel AI SDK](/ai/ai-sdk)",
+    "[Mastra](/ai/mastra)",
+    "[OpenAI Agents](/ai/openai)",
+    "[Anthropic](/ai/anthropic)",
+    "[LangChain](/ai/langchain)"
+  ]
+}

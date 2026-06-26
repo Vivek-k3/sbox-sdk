@@ -1,0 +1,34 @@
+---
+title: ports
+description: Expose a port and get a preview URL, list exposures, and proxy a fetch through the sandbox. Gated on the exposePort capability.
+---
+
+`sandbox.ports` is **capability-gated** on `exposePort` — native on E2B, Vercel, and Cloudflare; emulated on the in-memory provider. Guard before use:
+
+```ts
+if (sandbox.ports) {
+  const preview = await sandbox.ports.expose(3000);
+  console.log(preview.url);
+}
+```
+
+## Methods
+
+| Method     | Signature                                   | Notes                                                                   |
+| ---------- | ------------------------------------------- | ----------------------------------------------------------------------- |
+| `expose`   | `(port, { private? }) => Promise<Preview>`  | Returns the preview URL                                                 |
+| `unexpose` | `(port) => Promise<void>`                   |                                                                         |
+| `list`     | `() => Promise<Preview[]>`                  |                                                                         |
+| `fetch`    | `(port, path?, init?) => Promise<Response>` | Proxy a request through the sandbox (where `proxiedFetch` is supported) |
+
+## `Preview`
+
+```ts
+interface Preview {
+  url: string;
+  port: number;
+  token?: string;
+}
+```
+
+How the `url` is formed depends on the provider's `previewModel` flag — `subdomain` (E2B), `declaredPorts` (Vercel), `wildcardDNS` (Cloudflare), or `ip` (memory). See [Capabilities](/capabilities).

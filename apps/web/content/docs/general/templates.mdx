@@ -1,0 +1,31 @@
+---
+title: Templates
+description: The build-time base image for a sandbox. A single opaque string on SandboxSpec, mapped per-adapter to that provider's nearest concept.
+---
+
+`template` is the one field on `SandboxSpec` whose meaning is **deliberately provider-specific** — the build-time base your sandbox boots from.
+
+```ts
+const sandbox = await client.create({ template: "python-3.12" });
+```
+
+It's an optional, opaque `string`. The core never inspects it — it forwards the spec to the adapter, which maps `template` to that provider's nearest concept.
+
+## How each adapter maps it
+
+| Adapter        | `template` maps to                                                                                 | If omitted               |
+| -------------- | -------------------------------------------------------------------------------------------------- | ------------------------ |
+| **E2B**        | The E2B template id / alias (e.g. `"python-3.12"`, or a custom-built template)                     | E2B's default base       |
+| **Vercel**     | The `runtime` selector (e.g. `"node22"`) — not an arbitrary image                                  | Vercel's default runtime |
+| **Cloudflare** | **Ignored** — the image is baked into the Worker's container config at deploy time, not per-create | n/a                      |
+| **memory**     | **Ignored** — there are no images in-memory                                                        | n/a                      |
+
+## Not portable across providers
+
+Because the value means different things to different providers, a `template` string is **not portable**. `{ template: "python-3.12" }` is valid on E2B, would be the wrong value on Vercel (which wants a runtime id), and is silently ignored on Cloudflare and memory.
+
+This is the one documented break in the swap-one-import promise for `create()` — picking a base image is inherently provider-specific, so the SDK surfaces it honestly rather than pretending a universal catalog exists.
+
+## Templates vs snapshots
+
+`template` is the _build-time_ base set once at create. [Snapshots](/api/snapshots) are _runtime_ checkpoints you take and restore on a live sandbox. They're separate surfaces, even where a provider implements them with the same underlying mechanism.

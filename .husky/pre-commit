@@ -1,0 +1,4 @@
+bun run check
+bun run types
+bun run test
+bun run build --filter sbox-sdk
