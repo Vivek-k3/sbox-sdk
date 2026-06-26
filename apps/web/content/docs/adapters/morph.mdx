@@ -1,0 +1,72 @@
+---
+title: Morph
+icon: morph
+description: A sandbox per MorphCloud instance. Snapshot-first VMs with instant branching, via the morphcloud SDK.
+---
+
+<ProviderLinks provider="morph" />
+
+## Installation
+
+`morphcloud` is an optional peer dependency of `sbox-sdk`, loaded lazily on first use.
+
+```package-install
+sbox-sdk morphcloud
+```
+
+## Usage
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { morph } from "sbox-sdk/morph";
+
+const client = createSandboxClient({
+  provider: morph({ apiKey: process.env.MORPH_API_KEY! }),
+});
+
+// `template` is a snapshot id (booted directly) or an image to snapshot first.
+const sandbox = await client.create({ template: "morphvm-minimal" });
+const res = await sandbox.commands.run("uname -a");
+console.log(res.stdout);
+
+// Morph's signature move: branch the live instance into N forks.
+const forks = await sandbox.snapshots!.fork(3);
+```
+
+Morph is **snapshot-first** — there's no boot-from-image, so `create()` either boots a `snapshot…` [`template`](/templates) directly or lazily builds a snapshot from an image (`imageId`, `resources`) and boots that.
+
+<Callout type="info">
+  Exec is the buffered `instance.exec(cmd)` (`streaming` emulated); it has no
+  per-command `cwd`/`env`, so the core folds those into a `cd … && KEY=v …`
+  wrapper (`perCommandEnvCwd: false`). Files are read and written via `exec` +
+  `base64`. Ports are public HTTP services (`exposeHttpService`).
+  `snapshots.create()` is `instance.snapshot()` and `fork()` is
+  `instance.branch()` — both native; in-place `restore` is not supported
+  (branching makes new instances). `destroy()` stops the instance; there is no
+  separate `pause`.
+</Callout>
+
+## Authentication
+
+<AuthEnv provider="morph" />
+
+## Options
+
+<AutoTypeTable
+  path="../../packages/sbox-sdk/src/morph/index.ts"
+  name="MorphOptions"
+/>
+
+## Capabilities
+
+| Capability          |    Level    | Notes                          |
+| ------------------- | :---------: | ------------------------------ |
+| `list`              |   native    |                                |
+| `snapshot` / `fork` |   native    | `instance.snapshot()` / `branch()` |
+| `streaming`         |  emulated   | `instance.exec` is buffered    |
+| `filesUpload`       |   native    | via `exec` + base64            |
+| `exposePort`        |   native    | `exposeHttpService`            |
+| `codeInterpreter`   | unsupported |                                |
+| `pause` / `stop`    | unsupported | `destroy()` = stop instance    |
+
+`perCommandEnvCwd` is `false` (core wraps); `previewModel` is `subdomain`. In-place snapshot `restore` reports `NotSupported`.

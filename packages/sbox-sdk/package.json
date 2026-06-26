@@ -99,6 +99,34 @@
     "./aws-lambda": {
       "types": "./dist/aws-lambda/index.d.ts",
       "import": "./dist/aws-lambda/index.js"
+    },
+    "./northflank": {
+      "types": "./dist/northflank/index.d.ts",
+      "import": "./dist/northflank/index.js"
+    },
+    "./runloop": {
+      "types": "./dist/runloop/index.d.ts",
+      "import": "./dist/runloop/index.js"
+    },
+    "./codesandbox": {
+      "types": "./dist/codesandbox/index.d.ts",
+      "import": "./dist/codesandbox/index.js"
+    },
+    "./morph": {
+      "types": "./dist/morph/index.d.ts",
+      "import": "./dist/morph/index.js"
+    },
+    "./blaxel": {
+      "types": "./dist/blaxel/index.d.ts",
+      "import": "./dist/blaxel/index.js"
+    },
+    "./beam": {
+      "types": "./dist/beam/index.d.ts",
+      "import": "./dist/beam/index.js"
+    },
+    "./railway": {
+      "types": "./dist/railway/index.d.ts",
+      "import": "./dist/railway/index.js"
     }
   },
   "scripts": {
@@ -114,18 +142,25 @@
     "@aws-sdk/client-lambda": "^3.1075.0",
     "@aws-sdk/client-lambda-microvms": "^3.1075.0",
     "@aws-sdk/client-s3": "^3.1075.0",
+    "@beamcloud/beam-js": "*",
+    "@blaxel/core": "*",
     "@cloudflare/sandbox": "^0.12.1",
+    "@codesandbox/sdk": "*",
     "@daytonaio/sdk": "^0.191.0",
     "@e2b/code-interpreter": "^2.6.1",
     "@langchain/core": "^0.3.0",
     "@mastra/core": "^1.46.0",
+    "@northflank/js-client": "*",
     "@openai/agents": "^0.12.0",
+    "@runloop/api-client": "*",
     "@sbox-sdk/config": "workspace:*",
     "@types/node": "^25.9.1",
     "@typescript/native-preview": "7.0.0-dev.20260624.1",
     "@vercel/sandbox": "^2.2.1",
     "ai": "^5.0.0",
     "modal": "^0.8.1",
+    "morphcloud": "*",
+    "railway": "*",
     "typescript": "5.9.2",
     "vitest": "^3.2.4",
     "zod": "^4.0.0"
@@ -133,22 +168,50 @@
   "peerDependencies": {
     "@anthropic-ai/sdk": ">=0.40.0",
     "@aws-sdk/client-lambda-microvms": "*",
+    "@beamcloud/beam-js": "*",
+    "@blaxel/core": "*",
     "@cloudflare/sandbox": "*",
+    "@codesandbox/sdk": "*",
     "@daytonaio/sdk": "*",
     "@e2b/code-interpreter": "*",
     "@langchain/core": ">=0.3.0",
     "@mastra/core": "^1.0.0",
+    "@northflank/js-client": "*",
     "@openai/agents": ">=0.12.0",
+    "@runloop/api-client": "*",
     "@vercel/sandbox": "*",
     "ai": "^5.0.0 || ^6.0.0",
     "modal": "*",
+    "morphcloud": "*",
+    "railway": "*",
     "zod": "^3.25.0 || ^4.0.0"
   },
   "peerDependenciesMeta": {
     "@aws-sdk/client-lambda-microvms": {
       "optional": true
     },
+    "@beamcloud/beam-js": {
+      "optional": true
+    },
+    "@blaxel/core": {
+      "optional": true
+    },
     "@cloudflare/sandbox": {
+      "optional": true
+    },
+    "@codesandbox/sdk": {
+      "optional": true
+    },
+    "@northflank/js-client": {
+      "optional": true
+    },
+    "@runloop/api-client": {
+      "optional": true
+    },
+    "morphcloud": {
+      "optional": true
+    },
+    "railway": {
       "optional": true
     },
     "@daytonaio/sdk": {

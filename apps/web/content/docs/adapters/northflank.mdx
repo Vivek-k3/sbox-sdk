@@ -1,0 +1,72 @@
+---
+title: Northflank
+icon: northflank
+description: A sandbox per Northflank deployment service. The services platform, driven through @northflank/js-client — a sleep-infinity container you exec into.
+---
+
+<ProviderLinks provider="northflank" />
+
+## Installation
+
+`@northflank/js-client` is an optional peer dependency of `sbox-sdk`, loaded lazily on first use.
+
+```package-install
+sbox-sdk @northflank/js-client
+```
+
+## Usage
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { northflank } from "sbox-sdk/northflank";
+
+const client = createSandboxClient({
+  provider: northflank({
+    token: process.env.NORTHFLANK_TOKEN!,
+    projectId: "my-project", // must already exist
+  }),
+});
+
+const sandbox = await client.create({ template: "ubuntu:22.04" });
+const res = await sandbox.commands.run("echo hi && ls /");
+console.log(res.stdout);
+
+await sandbox.pause(); // scale to zero — volume kept, compute billing stops
+```
+
+A sandbox is a **deployment service** that runs the base [`template`](/templates) image with a `sleep infinity` keep-alive command, so you can `exec` into it. `create()` waits (best-effort) for the service to reach `running` before returning.
+
+<Callout type="warn">
+  Node-only: the SDK streams exec output over Node `EventEmitter`s, which the
+  adapter buffers. `exec` has no per-command `cwd`/`env`, so the core folds those
+  into a `cd … && KEY=v …` wrapper (`perCommandEnvCwd: false`) and `streaming`
+  is emulated. Files are read and written via `exec` + `base64`. `pause()` scales
+  the service to zero (volume retained, **memory lost**); `destroy()` deletes the
+  service and its child objects.
+</Callout>
+
+## Authentication
+
+<AuthEnv provider="northflank" />
+
+## Options
+
+<AutoTypeTable
+  path="../../packages/sbox-sdk/src/northflank/index.ts"
+  name="NorthflankOptions"
+/>
+
+## Capabilities
+
+| Capability          |    Level    | Notes                              |
+| ------------------- | :---------: | ---------------------------------- |
+| `list`              |   native    |                                    |
+| `pause`             |   native    | scale-to-zero (volume kept)        |
+| `streaming`         |  emulated   | exec session is buffered           |
+| `filesUpload`       |   native    | via `exec` + base64                |
+| `exposePort`        |   native    | public service port → DNS          |
+| `codeInterpreter`   | unsupported |                                    |
+| `stop` / `setTimeout` | unsupported | `pause` is the keep-disk state   |
+| `snapshot` / `fork` | unsupported | services platform, no VM snapshots |
+
+`perCommandEnvCwd` is `false` (core wraps); `preservesMemoryOnPause` is `false`; `previewModel` is `subdomain`.

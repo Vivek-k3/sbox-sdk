@@ -1,0 +1,78 @@
+---
+title: Beam Cloud
+icon: beam
+description: A sandbox per Beam Cloud container. Fast, GPU-capable sandboxes with snapshots, via @beamcloud/beam-js.
+---
+
+<ProviderLinks provider="beam" />
+
+## Installation
+
+`@beamcloud/beam-js` is an optional peer dependency of `sbox-sdk`, loaded lazily on first use.
+
+```package-install
+sbox-sdk @beamcloud/beam-js
+```
+
+## Usage
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { beam } from "sbox-sdk/beam";
+
+const client = createSandboxClient({
+  provider: beam({
+    token: process.env.BEAM_TOKEN!,
+    workspaceId: process.env.BEAM_WORKSPACE_ID!,
+  }),
+});
+
+const sandbox = await client.create({
+  template: "python:3.12",
+  resources: { vcpus: 2, memoryMB: 2048, gpu: "A10G" }, // GPU is first-class
+});
+
+const res = await sandbox.commands.run("nvidia-smi");
+console.log(res.stdout);
+
+const snap = await sandbox.snapshots!.create();
+const forks = await sandbox.snapshots!.fork(2); // boot 2 from the snapshot
+```
+
+[`template`](/templates) is a base image. Sandboxes are real Linux containers with coreutils.
+
+<Callout type="info">
+  exec takes `{ cwd, env }` natively (`perCommandEnvCwd: true`) and the adapter
+  buffers the process streams (`streaming` emulated). The SDK's file helpers are
+  local-path based, so `files.read`/`files.write` go through `exec` + `base64`
+  (binary-safe). Ports are public SSL endpoints (`exposePort`). `snapshots.create()`
+  is `instance.snapshot()` and `fork()` snapshots then boots N sandboxes via
+  `createFromSnapshot` — in-place `restore` is not supported. `setTimeout()` maps
+  to `updateTtl`; `list` isn't exposed by the SDK.
+</Callout>
+
+## Authentication
+
+<AuthEnv provider="beam" />
+
+## Options
+
+<AutoTypeTable
+  path="../../packages/sbox-sdk/src/beam/index.ts"
+  name="BeamOptions"
+/>
+
+## Capabilities
+
+| Capability          |    Level    | Notes                          |
+| ------------------- | :---------: | ------------------------------ |
+| `gpu`               |   native    | `resources.gpu`                |
+| `snapshot` / `fork` |   native    | `snapshot()` + `createFromSnapshot` |
+| `setTimeout`        |   native    | `updateTtl`                    |
+| `exposePort`        |   native    | public SSL endpoint            |
+| `filesUpload`       |   native    | via `exec` + base64            |
+| `streaming`         |  emulated   | buffered process streams       |
+| `list`              | unsupported | not exposed by the SDK         |
+| `pause` / `stop`    | unsupported | `destroy()` = terminate        |
+
+`perCommandEnvCwd` is `true`; `previewModel` is `subdomain`. In-place snapshot `restore` reports `NotSupported`.

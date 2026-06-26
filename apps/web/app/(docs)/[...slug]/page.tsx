@@ -8,6 +8,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { PageActions } from "@/components/page-actions";
+import { BETA_PROVIDERS } from "@/lib/capabilities";
 import { getLLMText } from "@/lib/get-llm-text";
 import { PROVIDER_ICONS } from "@/lib/icons";
 import { source } from "@/lib/source";
@@ -35,7 +36,8 @@ const Page = async ({ params }: PageProps) => {
   const markdown = await getLLMText(page);
   const markdownUrl = `${page.url}.md`;
 
-  const iconId = typeof page.data.icon === "string" ? page.data.icon : undefined;
+  const iconId =
+    typeof page.data.icon === "string" ? page.data.icon : undefined;
   const TitleIcon = iconId ? PROVIDER_ICONS[iconId] : undefined;
 
   return (
@@ -47,6 +49,11 @@ const Page = async ({ params }: PageProps) => {
           </span>
         ) : null}
         {page.data.title}
+        {iconId && BETA_PROVIDERS.has(iconId) ? (
+          <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 font-medium text-amber-600 text-xs tracking-normal dark:text-amber-400">
+            Beta
+          </span>
+        ) : null}
       </DocsTitle>
       <DocsDescription>{page.data.description}</DocsDescription>
       <PageActions

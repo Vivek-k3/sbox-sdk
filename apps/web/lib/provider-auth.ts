@@ -26,84 +26,424 @@ export interface ProviderAuth {
 }
 
 export const PROVIDER_AUTH: Record<string, ProviderAuth> = {
-  memory: {
-    summary: "No credentials — runs in-process.",
-    vars: [],
-  },
-
-  e2b: {
-    summary: "A single API key.",
-    vars: [
-      { option: "apiKey", env: "E2B_API_KEY", required: true, description: "Your E2B API key." },
-      { option: "baseUrl", env: null, required: false, description: "Override the E2B API base URL (self-hosted / proxy)." },
-    ],
-  },
-
-  vercel: {
-    summary: "An access token plus the team and project ids.",
-    vars: [
-      { option: "token", env: "VERCEL_TOKEN", required: true, description: "Vercel access token, or an OIDC token." },
-      { option: "teamId", env: "VERCEL_TEAM_ID", required: true, description: "The team that owns the project." },
-      { option: "projectId", env: "VERCEL_PROJECT_ID", required: true, description: "The project to associate sandboxes with." },
-    ],
+  "aws-lambda": {
     notes:
-      "When running on Vercel, the @vercel/sandbox SDK can resolve these from the standard environment (e.g. VERCEL_OIDC_TOKEN) automatically — pass them explicitly anywhere else.",
+      "Credentials and region resolve through the standard AWS SDK chain (environment variables, shared config, or an instance/task role) when the `credentials` / `region` options are omitted.",
+    summary: "Standard AWS credentials + a MicroVM image ARN.",
+    vars: [
+      {
+        description:
+          "ARN of the MicroVM image (or pass `template` per `create()`).",
+        env: null,
+        option: "imageIdentifier",
+        required: true,
+      },
+      {
+        description: "AWS region the MicroVMs run in.",
+        env: "AWS_REGION",
+        option: "region",
+        required: true,
+      },
+      {
+        description: "AWS access key id.",
+        env: "AWS_ACCESS_KEY_ID",
+        option: "credentials.accessKeyId",
+        required: true,
+      },
+      {
+        description: "AWS secret access key.",
+        env: "AWS_SECRET_ACCESS_KEY",
+        option: "credentials.secretAccessKey",
+        required: true,
+      },
+      {
+        description: "Session token for temporary credentials.",
+        env: "AWS_SESSION_TOKEN",
+        option: "credentials.sessionToken",
+        required: false,
+      },
+    ],
+  },
+
+  beam: {
+    notes:
+      "Token and workspace fall back to the standard Beam environment when the options are omitted.",
+    summary: "An API token + workspace id.",
+    vars: [
+      {
+        description: "Beam API token.",
+        env: "BEAM_TOKEN",
+        option: "token",
+        required: true,
+      },
+      {
+        description: "Beam workspace id.",
+        env: "BEAM_WORKSPACE_ID",
+        option: "workspaceId",
+        required: true,
+      },
+      {
+        description: "Default base image when a spec omits `template`.",
+        env: null,
+        option: "image",
+        required: false,
+      },
+    ],
+  },
+
+  blaxel: {
+    notes:
+      "Falls back to Blaxel's standard environment (BL_API_KEY / BL_WORKSPACE) when the options are omitted.",
+    summary: "An API key + workspace.",
+    vars: [
+      {
+        description: "Blaxel API key.",
+        env: "BL_API_KEY",
+        option: "apiKey",
+        required: true,
+      },
+      {
+        description: "Blaxel workspace.",
+        env: "BL_WORKSPACE",
+        option: "workspace",
+        required: true,
+      },
+      {
+        description: "Default sandbox image when a spec omits `template`.",
+        env: null,
+        option: "image",
+        required: false,
+      },
+    ],
   },
 
   cloudflare: {
-    summary: "No API key — a Worker Durable Object binding.",
-    vars: [
-      { option: "binding", env: null, required: true, description: "The Durable Object namespace binding for your exported Sandbox class, read from the Worker `env`." },
-      { option: "hostname", env: null, required: false, description: "Your Worker's domain — required to build preview URLs for exposed ports." },
-    ],
     notes:
       "Cloudflare runs inside a Worker; authorization is the binding configured in wrangler.toml, not an environment variable.",
+    summary: "No API key — a Worker Durable Object binding.",
+    vars: [
+      {
+        description:
+          "The Durable Object namespace binding for your exported Sandbox class, read from the Worker `env`.",
+        env: null,
+        option: "binding",
+        required: true,
+      },
+      {
+        description:
+          "Your Worker's domain — required to build preview URLs for exposed ports.",
+        env: null,
+        option: "hostname",
+        required: false,
+      },
+    ],
+  },
+
+  codesandbox: {
+    summary: "A single API key.",
+    vars: [
+      {
+        description: "CodeSandbox API key.",
+        env: "CSB_API_KEY",
+        option: "apiKey",
+        required: true,
+      },
+      {
+        description:
+          "Default template/sandbox id to fork from when `template` is omitted.",
+        env: null,
+        option: "templateId",
+        required: false,
+      },
+    ],
   },
 
   daytona: {
     summary: "A single API key (plus an optional region).",
     vars: [
-      { option: "apiKey", env: "DAYTONA_API_KEY", required: true, description: "Your Daytona API key." },
-      { option: "apiUrl", env: "DAYTONA_API_URL", required: false, description: "Override the Daytona API URL (self-hosted)." },
-      { option: "target", env: "DAYTONA_TARGET", required: false, description: 'Target region, e.g. "us" or "eu".' },
+      {
+        description: "Your Daytona API key.",
+        env: "DAYTONA_API_KEY",
+        option: "apiKey",
+        required: true,
+      },
+      {
+        description: "Override the Daytona API URL (self-hosted).",
+        env: "DAYTONA_API_URL",
+        option: "apiUrl",
+        required: false,
+      },
+      {
+        description: 'Target region, e.g. "us" or "eu".',
+        env: "DAYTONA_TARGET",
+        option: "target",
+        required: false,
+      },
     ],
   },
 
-  modal: {
-    summary: "A token id + secret (or Modal's standard environment).",
+  e2b: {
+    summary: "A single API key.",
     vars: [
-      { option: "tokenId", env: "MODAL_TOKEN_ID", required: true, description: "Modal token id." },
-      { option: "tokenSecret", env: "MODAL_TOKEN_SECRET", required: true, description: "Modal token secret." },
-      { option: "environment", env: "MODAL_ENVIRONMENT", required: false, description: "Modal environment name." },
-      { option: "appName", env: null, required: false, description: 'App to attach sandboxes to (created if missing). Defaults to "sbox-sdk".' },
-      { option: "image", env: null, required: false, description: "Default container image when a spec omits `template`." },
+      {
+        description: "Your E2B API key.",
+        env: "E2B_API_KEY",
+        option: "apiKey",
+        required: true,
+      },
+      {
+        description: "Override the E2B API base URL (self-hosted / proxy).",
+        env: null,
+        option: "baseUrl",
+        required: false,
+      },
     ],
-    notes:
-      "Credentials fall back to the standard Modal environment (MODAL_TOKEN_ID / MODAL_TOKEN_SECRET) when the options are omitted.",
   },
 
   fly: {
     summary: "An API token + the target app name.",
     vars: [
-      { option: "apiToken", env: "FLY_API_TOKEN", required: true, description: "Fly API token (`fly auth token`)." },
-      { option: "appName", env: "FLY_APP_NAME", required: true, description: "The Fly app the machines run in (must already exist)." },
-      { option: "region", env: "FLY_REGION", required: false, description: 'Default region, e.g. "iad".' },
-      { option: "image", env: null, required: false, description: "Default machine image." },
-      { option: "appDomain", env: null, required: false, description: "Public app domain for preview URLs; defaults to <appName>.fly.dev." },
-      { option: "apiBaseUrl", env: null, required: false, description: "Override the Machines API base URL." },
+      {
+        description: "Fly API token (`fly auth token`).",
+        env: "FLY_API_TOKEN",
+        option: "apiToken",
+        required: true,
+      },
+      {
+        description: "The Fly app the machines run in (must already exist).",
+        env: "FLY_APP_NAME",
+        option: "appName",
+        required: true,
+      },
+      {
+        description: 'Default region, e.g. "iad".',
+        env: "FLY_REGION",
+        option: "region",
+        required: false,
+      },
+      {
+        description: "Default machine image.",
+        env: null,
+        option: "image",
+        required: false,
+      },
+      {
+        description:
+          "Public app domain for preview URLs; defaults to <appName>.fly.dev.",
+        env: null,
+        option: "appDomain",
+        required: false,
+      },
+      {
+        description: "Override the Machines API base URL.",
+        env: null,
+        option: "apiBaseUrl",
+        required: false,
+      },
     ],
   },
 
-  "aws-lambda": {
-    summary: "Standard AWS credentials + a MicroVM image ARN.",
-    vars: [
-      { option: "imageIdentifier", env: null, required: true, description: "ARN of the MicroVM image (or pass `template` per `create()`)." },
-      { option: "region", env: "AWS_REGION", required: true, description: "AWS region the MicroVMs run in." },
-      { option: "credentials.accessKeyId", env: "AWS_ACCESS_KEY_ID", required: true, description: "AWS access key id." },
-      { option: "credentials.secretAccessKey", env: "AWS_SECRET_ACCESS_KEY", required: true, description: "AWS secret access key." },
-      { option: "credentials.sessionToken", env: "AWS_SESSION_TOKEN", required: false, description: "Session token for temporary credentials." },
-    ],
+  memory: {
+    summary: "No credentials — runs in-process.",
+    vars: [],
+  },
+
+  modal: {
     notes:
-      "Credentials and region resolve through the standard AWS SDK chain (environment variables, shared config, or an instance/task role) when the `credentials` / `region` options are omitted.",
+      "Credentials fall back to the standard Modal environment (MODAL_TOKEN_ID / MODAL_TOKEN_SECRET) when the options are omitted.",
+    summary: "A token id + secret (or Modal's standard environment).",
+    vars: [
+      {
+        description: "Modal token id.",
+        env: "MODAL_TOKEN_ID",
+        option: "tokenId",
+        required: true,
+      },
+      {
+        description: "Modal token secret.",
+        env: "MODAL_TOKEN_SECRET",
+        option: "tokenSecret",
+        required: true,
+      },
+      {
+        description: "Modal environment name.",
+        env: "MODAL_ENVIRONMENT",
+        option: "environment",
+        required: false,
+      },
+      {
+        description:
+          'App to attach sandboxes to (created if missing). Defaults to "sbox-sdk".',
+        env: null,
+        option: "appName",
+        required: false,
+      },
+      {
+        description: "Default container image when a spec omits `template`.",
+        env: null,
+        option: "image",
+        required: false,
+      },
+    ],
+  },
+
+  morph: {
+    notes:
+      "Morph is snapshot-first: pass a snapshot id as `template` to boot it directly, or any other value as an image to snapshot first.",
+    summary: "A single API key.",
+    vars: [
+      {
+        description: "MorphCloud API key.",
+        env: "MORPH_API_KEY",
+        option: "apiKey",
+        required: true,
+      },
+      {
+        description: "Override the MorphCloud API base URL.",
+        env: null,
+        option: "baseUrl",
+        required: false,
+      },
+      {
+        description:
+          'Default image to snapshot from when `template` is not a snapshot id (default "morphvm-minimal").',
+        env: null,
+        option: "imageId",
+        required: false,
+      },
+      {
+        description: "Default vCPUs for a lazily-created snapshot.",
+        env: null,
+        option: "vcpus",
+        required: false,
+      },
+      {
+        description: "Default memory (MB) for a lazily-created snapshot.",
+        env: null,
+        option: "memory",
+        required: false,
+      },
+      {
+        description: "Default disk size for a lazily-created snapshot.",
+        env: null,
+        option: "diskSize",
+        required: false,
+      },
+    ],
+  },
+
+  northflank: {
+    summary: "An API token + the project the sandbox services live in.",
+    vars: [
+      {
+        description: "Northflank API token.",
+        env: "NORTHFLANK_TOKEN",
+        option: "token",
+        required: true,
+      },
+      {
+        description: "Project the sandbox services are created in.",
+        env: null,
+        option: "projectId",
+        required: true,
+      },
+      {
+        description:
+          'Compute plan for new sandboxes (default "nf-compute-200").',
+        env: null,
+        option: "deploymentPlan",
+        required: false,
+      },
+      {
+        description: 'Default base image (default "ubuntu:22.04").',
+        env: null,
+        option: "image",
+        required: false,
+      },
+      {
+        description:
+          "Ephemeral storage in MB for new sandboxes (default 2048).",
+        env: null,
+        option: "ephemeralStorageMB",
+        required: false,
+      },
+    ],
+  },
+
+  railway: {
+    notes:
+      "Token and environment id fall back to RAILWAY_API_TOKEN / RAILWAY_ENVIRONMENT_ID when the options are omitted.",
+    summary: "An API token + environment id.",
+    vars: [
+      {
+        description: "Railway API token.",
+        env: "RAILWAY_API_TOKEN",
+        option: "token",
+        required: true,
+      },
+      {
+        description: "Target environment id the sandboxes run in.",
+        env: "RAILWAY_ENVIRONMENT_ID",
+        option: "environmentId",
+        required: true,
+      },
+      {
+        description:
+          'Network isolation for new sandboxes ("ISOLATED" or "PRIVATE").',
+        env: null,
+        option: "networkIsolation",
+        required: false,
+      },
+    ],
+  },
+
+  runloop: {
+    summary: "A single API key.",
+    vars: [
+      {
+        description: "Runloop API key (sent as the SDK bearer token).",
+        env: "RUNLOOP_API_KEY",
+        option: "apiKey",
+        required: true,
+      },
+      {
+        description: "Override the Runloop API base URL.",
+        env: null,
+        option: "baseURL",
+        required: false,
+      },
+      {
+        description: "Default blueprint id when a spec omits `template`.",
+        env: null,
+        option: "blueprintId",
+        required: false,
+      },
+    ],
+  },
+
+  vercel: {
+    notes:
+      "When running on Vercel, the @vercel/sandbox SDK can resolve these from the standard environment (e.g. VERCEL_OIDC_TOKEN) automatically — pass them explicitly anywhere else.",
+    summary: "An access token plus the team and project ids.",
+    vars: [
+      {
+        description: "Vercel access token, or an OIDC token.",
+        env: "VERCEL_TOKEN",
+        option: "token",
+        required: true,
+      },
+      {
+        description: "The team that owns the project.",
+        env: "VERCEL_TEAM_ID",
+        option: "teamId",
+        required: true,
+      },
+      {
+        description: "The project to associate sandboxes with.",
+        env: "VERCEL_PROJECT_ID",
+        option: "projectId",
+        required: true,
+      },
+    ],
   },
 };

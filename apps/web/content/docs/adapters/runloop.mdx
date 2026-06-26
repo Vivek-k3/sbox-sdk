@@ -1,0 +1,73 @@
+---
+title: Runloop
+icon: runloop
+description: A sandbox per Runloop devbox. AI-focused devboxes with suspend/resume and disk snapshots, via @runloop/api-client.
+---
+
+<ProviderLinks provider="runloop" />
+
+## Installation
+
+`@runloop/api-client` is an optional peer dependency of `sbox-sdk`, loaded lazily on first use.
+
+```package-install
+sbox-sdk @runloop/api-client
+```
+
+## Usage
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { runloop } from "sbox-sdk/runloop";
+
+const client = createSandboxClient({
+  provider: runloop({ apiKey: process.env.RUNLOOP_API_KEY! }),
+});
+
+const sandbox = await client.create({ template: "my-blueprint" });
+const res = await sandbox.commands.run("python --version");
+console.log(res.stdout);
+
+// Snapshot the disk, then fork two fresh devboxes from it.
+const forks = await sandbox.snapshots!.fork(2);
+
+await sandbox.pause(); // suspend — memory preserved
+```
+
+[`template`](/templates) is a **blueprint id**, or a **snapshot id** (`snp…`) to restore disk state into a new devbox. `create()` polls until the devbox is `running`.
+
+<Callout type="info">
+  Exec is the buffered `executeSync` (`streaming` emulated); the devbox runs it
+  through a shell, so the core folds `cwd`/`env` into a `cd … && KEY=v …` wrapper
+  (`perCommandEnvCwd: false`). Files use the binary-safe `downloadFile` /
+  `uploadFile` endpoints. `suspend`/`resume` map to `pause()`/`resume()` (memory
+  preserved); `shutdown` is `destroy()`. `snapshots.create()` is `snapshotDisk`
+  and `fork()` snapshots then boots N devboxes — in-place `restore` is not
+  supported (snapshots create new devboxes).
+</Callout>
+
+## Authentication
+
+<AuthEnv provider="runloop" />
+
+## Options
+
+<AutoTypeTable
+  path="../../packages/sbox-sdk/src/runloop/index.ts"
+  name="RunloopOptions"
+/>
+
+## Capabilities
+
+| Capability          |    Level    | Notes                          |
+| ------------------- | :---------: | ------------------------------ |
+| `list`              |   native    |                                |
+| `pause`             |   native    | suspend (memory preserved)     |
+| `streaming`         |  emulated   | `executeSync` is buffered      |
+| `filesUpload`       |   native    | binary `uploadFile`            |
+| `exposePort`        |   native    | tunnel via `enableTunnel`      |
+| `snapshot` / `fork` |   native    | `snapshotDisk`; fork = boot N  |
+| `codeInterpreter`   | unsupported |                                |
+| `stop`              | unsupported | `pause` (suspend) / `destroy`  |
+
+`perCommandEnvCwd` is `false` (core wraps); `preservesMemoryOnPause` is `true`; `previewModel` is `subdomain`. In-place snapshot `restore` reports `NotSupported`.

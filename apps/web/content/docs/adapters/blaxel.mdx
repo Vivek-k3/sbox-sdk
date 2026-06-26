@@ -1,0 +1,76 @@
+---
+title: Blaxel
+icon: blaxel
+description: A sandbox per Blaxel instance. The "perpetual sandbox" — stays in standby indefinitely and resumes in sub-25ms, via @blaxel/core.
+---
+
+<ProviderLinks provider="blaxel" />
+
+## Installation
+
+`@blaxel/core` is an optional peer dependency of `sbox-sdk`, loaded lazily on first use.
+
+```package-install
+sbox-sdk @blaxel/core
+```
+
+## Usage
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { blaxel } from "sbox-sdk/blaxel";
+
+const client = createSandboxClient({
+  provider: blaxel({
+    apiKey: process.env.BL_API_KEY!,
+    workspace: process.env.BL_WORKSPACE!,
+  }),
+});
+
+const sandbox = await client.create({ template: "blaxel/prod-base:latest" });
+const res = await sandbox.commands.run("node --version");
+console.log(res.stdout);
+
+// Public preview URL for a port (pass { private: true } for a signed one).
+const preview = await sandbox.ports!.expose(3000);
+console.log(preview.url);
+```
+
+[`template`](/templates) is the sandbox image. There's no explicit pause/resume — Blaxel keeps the sandbox in standby and resumes it in sub-25ms on the next request; `destroy()` removes it.
+
+<Callout type="info">
+  exec is the buffered `process.exec({ waitForCompletion: true })` (`streaming`
+  emulated); it has no per-command env (only a working dir), so the core folds
+  cwd+env into a `cd … && KEY=v …` wrapper (`perCommandEnvCwd: false`).
+  Filesystem read/write use the binary-safe `fs.readBinary` / `fs.writeBinary`;
+  `rm`/`mv`/`stat` aren't in the SDK surface, so the core polyfills them via
+  exec. Preview URLs can be public or private (`privatePreview`). Credentials
+  fall back to Blaxel's standard environment (`BL_API_KEY` / `BL_WORKSPACE`).
+</Callout>
+
+## Authentication
+
+<AuthEnv provider="blaxel" />
+
+## Options
+
+<AutoTypeTable
+  path="../../packages/sbox-sdk/src/blaxel/index.ts"
+  name="BlaxelOptions"
+/>
+
+## Capabilities
+
+| Capability          |    Level    | Notes                          |
+| ------------------- | :---------: | ------------------------------ |
+| `list`              |   native    |                                |
+| `exposePort`        |   native    | preview URLs                   |
+| `privatePreview`    |   native    | signed (`public: false`)       |
+| `region`            |   native    | chosen at create               |
+| `volumes`           |   native    | mounted at create              |
+| `filesUpload`       |   native    | `fs.writeBinary`               |
+| `streaming`         |  emulated   | exec waits for completion      |
+| `pause` / `stop`    | unsupported | standby/resume is automatic    |
+| `snapshot` / `fork` | unsupported |                                |
+
+`perCommandEnvCwd` is `false` (core wraps); `preservesMemoryOnPause` is `true` (standby); `previewModel` is `subdomain`.

@@ -1,0 +1,82 @@
+---
+title: Railway
+icon: railway
+description: A sandbox per Railway sandbox. Ephemeral, isolated Debian Linux VMs with native streaming exec, byte-accurate files, checkpoints and forking.
+---
+
+<ProviderLinks provider="railway" />
+
+<Callout type="warn">
+  **Beta.** Railway Sandboxes are a beta product; the SDK surface and behavior may
+  change. Pin the `railway` version and expect occasional breaking changes.
+</Callout>
+
+## Installation
+
+`railway` is an optional peer dependency of `sbox-sdk`, loaded lazily on first use.
+
+```package-install
+sbox-sdk railway
+```
+
+## Usage
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { railway } from "sbox-sdk/railway";
+
+const client = createSandboxClient({
+  provider: railway({
+    token: process.env.RAILWAY_API_TOKEN!,
+    environmentId: process.env.RAILWAY_ENVIRONMENT_ID!,
+  }),
+});
+
+const sandbox = await client.create({ template: "debian:bookworm" });
+
+// exec streams live via the SDK's onStdout/onStderr.
+for await (const ev of sandbox.commands.run("npm install")) {
+  if (ev.type === "stdout") process.stdout.write(ev.data);
+}
+
+await sandbox.files.write("/work/data.bin", new Uint8Array([1, 2, 3]));
+const forks = await sandbox.snapshots!.fork(2); // clone the filesystem
+```
+
+[`template`](/templates) is a base image (or a built template). Each sandbox is an isolated Debian Linux VM provisioned on demand.
+
+<Callout type="info">
+  This is one of the richest adapters: exec streams natively through the SDK's
+  `onStdout`/`onStderr` (`streaming: native`) and returns a real exit code;
+  filesystem is native and byte-accurate (`files.read(path, { format: "bytes" })`
+  / `files.write`). `snapshots.create()` maps to `checkpoint()` and `fork()` to
+  the native `fork()`. Sandboxes are **network-isolated**, so there are no public
+  preview ports (`exposePort` unsupported). Credentials fall back to
+  `RAILWAY_API_TOKEN` / `RAILWAY_ENVIRONMENT_ID`.
+</Callout>
+
+## Authentication
+
+<AuthEnv provider="railway" />
+
+## Options
+
+<AutoTypeTable
+  path="../../packages/sbox-sdk/src/railway/index.ts"
+  name="RailwayOptions"
+/>
+
+## Capabilities
+
+| Capability          |    Level    | Notes                          |
+| ------------------- | :---------: | ------------------------------ |
+| `list`              |   native    |                                |
+| `streaming`         |   native    | `onStdout` / `onStderr`        |
+| `filesUpload`       |   native    | byte-accurate `files.*`        |
+| `snapshot`          |   native    | `checkpoint()`                 |
+| `fork`              |   native    | clone the filesystem           |
+| `exposePort`        | unsupported | network-isolated VMs           |
+| `codeInterpreter`   | unsupported |                                |
+| `pause` / `stop`    | unsupported | `destroy()` = teardown         |
+
+`perCommandEnvCwd` is `true`; `previewModel` is `none` (no public ports). In-place snapshot `restore` reports `NotSupported`.
