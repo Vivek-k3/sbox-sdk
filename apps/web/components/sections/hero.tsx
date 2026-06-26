@@ -2,8 +2,8 @@ import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 
 import { InstallCommand } from "@/components/install-command";
-import { ProviderCube } from "@/components/sections/provider-cube";
 import { SwapLine } from "@/components/sections/swap-line";
+import { ThreeBody } from "@/components/sections/three-body";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -44,7 +44,7 @@ export const Hero = ({ latestVersion }: { latestVersion: string }) => (
       </div>
 
       <div className="flex justify-center lg:justify-end">
-        <ProviderCube />
+        <ThreeBody />
       </div>
     </div>
   </section>

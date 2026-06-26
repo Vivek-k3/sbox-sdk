@@ -3,7 +3,7 @@
 import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef } from "react";
 
-import { useSpin } from "@/components/lab/use-spin";
+import { useSpin } from "@/components/sections/use-spin";
 
 // ── Tweakables ──────────────────────────────────────────────────────────────
 // Change BODIES to add or remove bodies. Equal masses orbit each other in true
