@@ -1,7 +1,10 @@
 ---
 title: Modal
+icon: modal
 description: Modal sandboxes with streaming exec and first-class GPU. Backed by the modal JS SDK; an App + Image are created lazily.
 ---
+
+<ProviderLinks provider="modal" />
 
 ## Installation
 
@@ -43,6 +46,10 @@ Credentials fall back to Modal's standard environment (`MODAL_TOKEN_ID` / `MODAL
   (present on `python:*`, `debian`, `ubuntu`). Ports must be declared in
   `spec.ports` at create time before `ports.expose()` can resolve a tunnel.
 </Callout>
+
+## Authentication
+
+<AuthEnv provider="modal" />
 
 ## Options
 

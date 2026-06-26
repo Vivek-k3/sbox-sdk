@@ -1,7 +1,7 @@
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 
-import { InstallCommand } from "@/components/install-command";
+import { InstallToggle } from "@/components/install-toggle";
 import { SwapLine } from "@/components/sections/swap-line";
 import { ThreeBody } from "@/components/sections/three-body";
 import { buttonVariants } from "@/components/ui/button";
@@ -27,8 +27,8 @@ export const Hero = ({ latestVersion }: { latestVersion: string }) => (
           without rewriting a thing.
         </p>
 
-        <div className="mt-9 flex flex-wrap items-center justify-center gap-3 lg:justify-start">
-          <InstallCommand />
+        <div className="mt-9 flex flex-col items-center gap-5 lg:items-start">
+          <InstallToggle className="items-center lg:items-start" />
           <Link
             className={cn(buttonVariants({ size: "lg", variant: "ghost" }))}
             href="/general/overview"

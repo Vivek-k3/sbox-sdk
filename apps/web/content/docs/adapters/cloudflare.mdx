@@ -1,7 +1,10 @@
 ---
 title: Cloudflare Sandbox
+icon: cloudflare
 description: Cloudflare Sandbox via a Worker / Durable Object binding — a code interpreter, native ports with proxied fetch, and get-or-create semantics. Worker-only.
 ---
+
+<ProviderLinks provider="cloudflare" />
 
 ## Installation
 
@@ -36,6 +39,10 @@ export default {
 ```
 
 The base image is defined by your Worker's container config at deploy time, so [`template`](/templates) is ignored. `create()` uses `name` (or the idempotency key) as the Durable Object id, giving **get-or-create** semantics. `list` is unsupported.
+
+## Authentication
+
+<AuthEnv provider="cloudflare" />
 
 ## Options
 

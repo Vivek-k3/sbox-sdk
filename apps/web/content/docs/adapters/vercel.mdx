@@ -1,7 +1,10 @@
 ---
 title: Vercel Sandbox
+icon: vercel
 description: Vercel Sandbox via @vercel/sandbox — exec-emulation, native ports, and a filesystem that is auto-snapshotted on stop. No code interpreter.
 ---
+
+<ProviderLinks provider="vercel" />
 
 ## Installation
 
@@ -31,6 +34,10 @@ console.log(preview.url);
 ```
 
 [`template`](/templates) maps to Vercel's `runtime` selector (e.g. `"node22"`), not an arbitrary image. Vercel has no code interpreter, so `sandbox.code` is `undefined`.
+
+## Authentication
+
+<AuthEnv provider="vercel" />
 
 ## Options
 

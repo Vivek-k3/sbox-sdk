@@ -1,7 +1,10 @@
 ---
 title: Fly Machines
+icon: fly
 description: A sandbox per Fly Machine over the Machines REST API. Pure fetch — no SDK — so it runs anywhere the core does, including the edge.
 ---
+
+<ProviderLinks provider="fly" />
 
 ## Installation
 
@@ -39,6 +42,10 @@ The Fly app must exist; each sandbox is a **Machine** inside it. [`template`](/t
   unless a volume is attached (`preservesDiskOnStop: false`). Files are read and
   written via `exec` + `base64`.
 </Callout>
+
+## Authentication
+
+<AuthEnv provider="fly" />
 
 ## Options
 

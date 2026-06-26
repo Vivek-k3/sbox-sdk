@@ -1,5 +1,6 @@
 ---
 title: In-Memory
+icon: memory
 description: An in-memory sandbox backed by Maps — the zero-config default and the conformance fixture. No dependencies, no network, non-persistent. Ideal for tests.
 ---
 
@@ -40,6 +41,10 @@ import { memory } from "sbox-sdk/memory";
 
 const client = createSandboxClient({ provider: memory({ bareFs: true }) });
 ```
+
+## Authentication
+
+<AuthEnv provider="memory" />
 
 ## Options
 

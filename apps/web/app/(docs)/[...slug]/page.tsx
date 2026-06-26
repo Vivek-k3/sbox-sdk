@@ -9,6 +9,7 @@ import { notFound } from "next/navigation";
 
 import { PageActions } from "@/components/page-actions";
 import { getLLMText } from "@/lib/get-llm-text";
+import { PROVIDER_ICONS } from "@/lib/icons";
 import { source } from "@/lib/source";
 import { getMDXComponents } from "@/mdx-components";
 
@@ -34,9 +35,17 @@ const Page = async ({ params }: PageProps) => {
   const markdown = await getLLMText(page);
   const markdownUrl = `${page.url}.md`;
 
+  const iconId = typeof page.data.icon === "string" ? page.data.icon : undefined;
+  const TitleIcon = iconId ? PROVIDER_ICONS[iconId] : undefined;
+
   return (
     <DocsPage toc={page.data.toc} full={page.data.full}>
-      <DocsTitle className="font-semibold tracking-tight">
+      <DocsTitle className="flex items-center gap-2.5 font-semibold tracking-tight">
+        {TitleIcon ? (
+          <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/30">
+            <TitleIcon className="size-5 text-foreground" />
+          </span>
+        ) : null}
         {page.data.title}
       </DocsTitle>
       <DocsDescription>{page.data.description}</DocsDescription>

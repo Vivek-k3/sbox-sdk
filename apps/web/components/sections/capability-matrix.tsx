@@ -4,6 +4,7 @@ import { Fragment, useState } from "react";
 
 import { CAPABILITY_GROUPS, nativeCount, PROVIDERS } from "@/lib/capabilities";
 import type { Level } from "@/lib/capabilities";
+import { PROVIDER_ICONS } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 
 interface Hover {
@@ -68,23 +69,29 @@ export const CapabilityMatrix = () => {
               >
                 Capability
               </th>
-              {PROVIDERS.map((p, ci) => (
-                <th
-                  className={cn(
-                    "px-2 py-3 text-center align-bottom transition-colors",
-                    hover?.col === ci && "bg-accent/60"
-                  )}
-                  key={p.id}
-                  scope="col"
-                >
-                  <span className="block font-mono text-foreground text-xs">
-                    {p.name}
-                  </span>
-                  <span className="mt-0.5 block font-data text-[9px] text-dim tracking-[0.1em]">
-                    {nativeCount(p)}n
-                  </span>
-                </th>
-              ))}
+              {PROVIDERS.map((p, ci) => {
+                const Icon = PROVIDER_ICONS[p.id];
+                return (
+                  <th
+                    className={cn(
+                      "px-2 py-3 text-center align-bottom transition-colors",
+                      hover?.col === ci && "bg-accent/60"
+                    )}
+                    key={p.id}
+                    scope="col"
+                  >
+                    {Icon ? (
+                      <Icon className="mx-auto mb-1 size-4 text-foreground" />
+                    ) : null}
+                    <span className="block font-mono text-foreground text-xs">
+                      {p.name}
+                    </span>
+                    <span className="mt-0.5 block font-data text-[9px] text-dim tracking-[0.1em]">
+                      {nativeCount(p)}n
+                    </span>
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>

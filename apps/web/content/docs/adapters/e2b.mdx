@@ -1,7 +1,10 @@
 ---
 title: E2B
+icon: e2b
 description: The canonical reference adapter — richest capability set, with a code interpreter, snapshots, native ports, and pause/resume. Backed by @e2b/code-interpreter.
 ---
+
+<ProviderLinks provider="e2b" />
 
 ## Installation
 
@@ -29,6 +32,10 @@ console.log(exec.logs.stdout);
 ```
 
 E2B is the richest adapter and the reference implementation other adapters are measured against. [`template`](/templates) maps to an E2B template id / alias (e.g. `"python-3.12"` or a custom-built template).
+
+## Authentication
+
+<AuthEnv provider="e2b" />
 
 ## Options
 
