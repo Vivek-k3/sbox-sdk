@@ -7,8 +7,8 @@ description: A sandbox per Railway sandbox. Ephemeral, isolated Debian Linux VMs
 <ProviderLinks provider="railway" />
 
 <Callout type="warn">
-  **Beta.** Railway Sandboxes are a beta product; the SDK surface and behavior may
-  change. Pin the `railway` version and expect occasional breaking changes.
+  **Beta.** Railway Sandboxes are a beta product; the SDK surface and behavior
+  may change. Pin the `railway` version and expect occasional breaking changes.
 </Callout>
 
 ## Installation
@@ -68,15 +68,15 @@ const forks = await sandbox.snapshots!.fork(2); // clone the filesystem
 
 ## Capabilities
 
-| Capability          |    Level    | Notes                          |
-| ------------------- | :---------: | ------------------------------ |
-| `list`              |   native    |                                |
-| `streaming`         |   native    | `onStdout` / `onStderr`        |
-| `filesUpload`       |   native    | byte-accurate `files.*`        |
-| `snapshot`          |   native    | `checkpoint()`                 |
-| `fork`              |   native    | clone the filesystem           |
-| `exposePort`        | unsupported | network-isolated VMs           |
-| `codeInterpreter`   | unsupported |                                |
-| `pause` / `stop`    | unsupported | `destroy()` = teardown         |
+| Capability        |    Level    | Notes                   |
+| ----------------- | :---------: | ----------------------- |
+| `list`            |   native    |                         |
+| `streaming`       |   native    | `onStdout` / `onStderr` |
+| `filesUpload`     |   native    | byte-accurate `files.*` |
+| `snapshot`        |   native    | `checkpoint()`          |
+| `fork`            |   native    | clone the filesystem    |
+| `exposePort`      | unsupported | network-isolated VMs    |
+| `codeInterpreter` | unsupported |                         |
+| `pause` / `stop`  | unsupported | `destroy()` = teardown  |
 
 `perCommandEnvCwd` is `true`; `previewModel` is `none` (no public ports). In-place snapshot `restore` reports `NotSupported`.

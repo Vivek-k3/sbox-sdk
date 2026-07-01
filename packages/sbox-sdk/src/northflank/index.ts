@@ -27,7 +27,6 @@ import type {
   CapabilityMap,
   DriverExec,
   DriverHandle,
-  ExecOptions,
   OutputEvent,
   Preview,
   SandboxInfo,
@@ -119,9 +118,9 @@ interface NfApiClient {
   };
   get: {
     service: ((req: NfReq) => Promise<{ data?: { status?: string } }>) & {
-      ports(
-        req: NfReq
-      ): Promise<{ data?: { ports?: { internalPort: number; dns?: string }[] } }>;
+      ports(req: NfReq): Promise<{
+        data?: { ports?: { internalPort: number; dns?: string }[] };
+      }>;
     };
   };
   update: { service: { ports(req: NfReq): Promise<unknown> } };
@@ -192,10 +191,7 @@ export const northflank = defineProvider<
     return clientP;
   };
 
-  const makeHandle = (
-    ref: NfRef,
-    client: NfApiClient
-  ): DriverHandle<NfRef> => {
+  const makeHandle = (ref: NfRef, client: NfApiClient): DriverHandle<NfRef> => {
     const params = { projectId: ref.projectId, serviceId: ref.serviceId };
 
     const exec1 = async (
@@ -335,7 +331,9 @@ export const northflank = defineProvider<
               configType: "customCommand",
               customCommand: "sleep infinity",
             },
-            external: { imagePath: spec.template ?? opts.image ?? "ubuntu:22.04" },
+            external: {
+              imagePath: spec.template ?? opts.image ?? "ubuntu:22.04",
+            },
             storage: {
               ephemeralStorage: {
                 storageSize: opts.ephemeralStorageMB ?? 2048,
@@ -356,9 +354,13 @@ export const northflank = defineProvider<
           break;
         }
         if (status === "failed") {
-          throw new SandboxError("Provider", `service ${serviceId} failed to start`, {
-            provider: "northflank",
-          });
+          throw new SandboxError(
+            "Provider",
+            `service ${serviceId} failed to start`,
+            {
+              provider: "northflank",
+            }
+          );
         }
         await new Promise((r) => setTimeout(r, 2000));
       }

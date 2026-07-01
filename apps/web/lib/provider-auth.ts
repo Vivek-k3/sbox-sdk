@@ -192,9 +192,9 @@ export const PROVIDER_AUTH: Record<string, ProviderAuth> = {
         required: true,
       },
       {
-        description: "Override the E2B API base URL (self-hosted / proxy).",
+        description: "Self-hosted E2B domain, if not the default cloud.",
         env: null,
-        option: "baseUrl",
+        option: "domain",
         required: false,
       },
     ],

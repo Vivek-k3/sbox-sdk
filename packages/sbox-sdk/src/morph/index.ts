@@ -26,7 +26,6 @@ import type {
   CapabilityMap,
   DriverExec,
   DriverHandle,
-  ExecOptions,
   OutputEvent,
   Preview,
   SandboxInfo,
@@ -125,7 +124,9 @@ interface MorphClient {
   };
 }
 
-type MorphModule = { MorphCloudClient: new (opts: MorphOptions) => MorphClient };
+interface MorphModule {
+  MorphCloudClient: new (opts: MorphOptions) => MorphClient;
+}
 let cached: MorphModule | null = null;
 async function loadMorph(): Promise<MorphModule> {
   if (!cached) {

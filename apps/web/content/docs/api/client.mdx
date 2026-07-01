@@ -27,6 +27,7 @@ const client = createSandboxClient({
 | `fetch`           | `typeof fetch`            | `globalThis.fetch` | Injectable transport (test seam)                         |
 | `emulate`         | `(keyof CapabilityMap)[]` | —                  | Opt-in lossy emulations                                  |
 | `defaultMetadata` | `Record<string, string>`  | —                  | Merged into every `create`                               |
+| `plugins`         | `SandboxPlugin[]`         | `[]`               | Augment every sandbox (e.g. the `ai(...)` plugin)        |
 
 See [Retries & fallback](/retries) for `retry`, `fallback`, and `hooks` in depth.
 
@@ -34,14 +35,14 @@ See [Retries & fallback](/retries) for `retry`, `fallback`, and `hooks` in depth
 
 The object returned by `createSandboxClient`.
 
-| Member         | Signature                                             | Notes                                               |
-| -------------- | ----------------------------------------------------- | --------------------------------------------------- |
-| `create`       | `(spec?: SandboxSpec) => Promise<Sandbox>`            | Idempotency-aware; retries + fallback               |
-| `connect`      | `(id: string) => Promise<Sandbox>`                    | Reattach to an existing sandbox                     |
-| `list`         | `(filter?: ListFilter) => AsyncIterable<SandboxInfo>` | Throws `NotSupported` if the provider has no `list` |
-| `provider`     | `string`                                              | Active provider name (readonly)                     |
-| `capabilities` | `Capabilities`                                        | `{ map, flags }` read-model (readonly)              |
-| `dispose`      | `() => Promise<void>`                                 | Release provider resources                          |
+| Member         | Signature                                                                  | Notes                                                                                                    |
+| -------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `create`       | `(spec?: SandboxSpec, options?: SandboxCreateOptions) => Promise<Sandbox>` | Idempotency-aware; retries + fallback. `options` carries per-sandbox plugin overrides (e.g. AI `policy`) |
+| `connect`      | `(id: string) => Promise<Sandbox>`                                         | Reattach to an existing sandbox                                                                          |
+| `list`         | `(filter?: ListFilter) => AsyncIterable<SandboxInfo>`                      | Throws `NotSupported` if the provider has no `list`                                                      |
+| `provider`     | `string`                                                                   | Active provider name (readonly)                                                                          |
+| `capabilities` | `Capabilities`                                                             | `{ map, flags }` read-model (readonly)                                                                   |
+| `dispose`      | `() => Promise<void>`                                                      | Release provider resources                                                                               |
 
 ## `SandboxSpec`
 

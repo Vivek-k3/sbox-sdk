@@ -51,7 +51,7 @@ const client = createSandboxClient({
 });
 
 const sandbox = await client.create();
-const res = await sandbox.commands.run("echo hello"); // -> "hello\n"
+const res = await sandbox.commands.run("echo hello"); // res.stdout === "hello\n"
 await sandbox.files.write("/tmp/data.txt", "hi");
 await sandbox.pause(); // SuspendMicrovm (memory + disk preserved up to 8h)
 await sandbox.resume(); // ResumeMicrovm

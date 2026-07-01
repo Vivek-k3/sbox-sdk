@@ -85,8 +85,12 @@ interface RailwayFiles {
     opts?: { format?: "text" | "bytes" | "stream" }
   ): Promise<Uint8Array | string>;
   write(path: string, content: Uint8Array | string): Promise<void>;
-  list(dir: string): Promise<{ name: string; type?: string; isDir?: boolean }[]>;
-  stat(path: string): Promise<{ size?: number; isDir?: boolean; type?: string; mtime?: number }>;
+  list(
+    dir: string
+  ): Promise<{ name: string; type?: string; isDir?: boolean }[]>;
+  stat(
+    path: string
+  ): Promise<{ size?: number; isDir?: boolean; type?: string; mtime?: number }>;
   mkdir(dir: string): Promise<void>;
   rename(from: string, to: string): Promise<void>;
   remove(path: string): Promise<void>;
@@ -117,7 +121,9 @@ interface RailwayStatic {
   connect(id: string): Promise<RailwaySandbox>;
   list(): Promise<{ id: string; status?: string }[]>;
 }
-type RailwayModule = { Sandbox: RailwayStatic };
+interface RailwayModule {
+  Sandbox: RailwayStatic;
+}
 
 let cached: RailwayModule | null = null;
 async function loadRailway(): Promise<RailwayModule> {
@@ -154,7 +160,10 @@ function mapState(state: string | undefined): SandboxState {
   }
 }
 
-function mapType(t: string | undefined, isDir: boolean | undefined): FileInfo["type"] {
+function mapType(
+  t: string | undefined,
+  isDir: boolean | undefined
+): FileInfo["type"] {
   if (isDir || t === "dir" || t === "directory") {
     return "dir";
   }
@@ -169,7 +178,9 @@ export const railway = defineProvider<
   RailwaySandbox,
   RailwayOptions
 >((opts) => {
-  const config = (extra: Record<string, unknown> = {}): Record<string, unknown> => ({
+  const config = (
+    extra: Record<string, unknown> = {}
+  ): Record<string, unknown> => ({
     token: opts.token,
     environmentId: opts.environmentId,
     ...extra,
@@ -268,7 +279,7 @@ export const railway = defineProvider<
         const name =
           snapOpts.name ?? `snap-${globalThis.crypto.randomUUID().slice(0, 8)}`;
         const cp = await sb.checkpoint(name);
-        const refId = typeof cp === "string" ? cp : cp.id ?? cp.name ?? name;
+        const refId = typeof cp === "string" ? cp : (cp.id ?? cp.name ?? name);
         return { id: refId, name, provider: "railway", raw: cp };
       },
       async fork(count: number): Promise<DriverHandle<RailwaySandbox>[]> {

@@ -10,10 +10,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  convertNpmCommand,
-  type PackageManager,
-} from "@/lib/convert-npm";
+import { convertNpmCommand } from "@/lib/convert-npm";
+import type { PackageManager } from "@/lib/convert-npm";
 import { cn } from "@/lib/utils";
 
 const NPM_COMMAND = "npm install sbox-sdk";

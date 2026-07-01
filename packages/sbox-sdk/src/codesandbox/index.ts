@@ -125,7 +125,9 @@ interface CsbSdk {
   };
 }
 
-type CsbModule = { CodeSandbox: new (apiKey?: string) => CsbSdk };
+interface CsbModule {
+  CodeSandbox: new (apiKey?: string) => CsbSdk;
+}
 let cached: CsbModule | null = null;
 async function loadCsb(): Promise<CsbModule> {
   if (!cached) {

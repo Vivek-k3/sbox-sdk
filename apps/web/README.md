@@ -1,16 +1,13 @@
 # sbox SDK docs (`apps/web`)
 
-The documentation site for `sbox-sdk` — a [Fumadocs](https://fumadocs.dev) +
-[Next.js](https://nextjs.org) App Router app, modeled on the
-[files-sdk.dev](https://files-sdk.dev) docs.
-
 ## Architecture
 
 - **`app/(home)`** — the marketing landing page (hero, capabilities, get-started).
 - **`app/(docs)/[...slug]`** — renders `content/docs/**/*.mdx` with the Fumadocs
   notebook layout.
 - **`content/docs`** — the docs themselves. `meta.json` files drive the sidebar
-  order; `general/`, `api/`, and `adapters/` are root folders (their own nav tabs).
+  order; `general/`, `adapters/`, `plugins/`, `ai/`, and `api/` are root folders
+  (their own nav tabs).
 - **`source.config.ts` + `lib/source.ts`** — the Fumadocs MDX source. Codegen
   runs via the `prebuild` / `predev` `fumadocs-mdx` step into `.source/`.
 - **`mdx-components.tsx`** — wires `<AutoTypeTable>`, which renders option tables

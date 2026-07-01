@@ -1,74 +1,105 @@
-# Name of our action
 name: Release
 
-permissions:
-  id-token: write
-  contents: write
-  pull-requests: write
-  issues: write
+# Auto-publishes sbox-sdk to npm on every merge to `main`.
+#
+# The bump is a PATCH by default (0.0.1 -> 0.0.2 -> 0.0.3 ...). To cut a minor
+# or major instead, put "#minor" or "#major" anywhere in the merge commit
+# message (for squash-merges this is the PR title). The job then commits the
+# version bump back to main as "chore(release): vX.Y.Z [skip actions]" and tags
+# it. "[skip actions]" stops GitHub Actions from re-triggering this workflow, but
+# is NOT a Vercel skip token, so Vercel's Git integration still redeploys the
+# site (and its version badge) on the bump.
+#
+# The web app is deployed by Vercel's own Git integration, not here.
 
-# The event that will trigger the action
+permissions:
+  contents: write
+
 on:
   push:
     branches: [main]
 
-# what the action will do
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
 
-    if: "!contains(github.event.head_commit.message, 'ci skip') && !contains(github.event.head_commit.message, 'skip ci')"
+    # Skip the workflow's own release commits and any explicit CI-skip request.
+    if: >-
+      !startsWith(github.event.head_commit.message, 'chore(release):') &&
+      !contains(github.event.head_commit.message, '[skip ci]') &&
+      !contains(github.event.head_commit.message, 'skip ci') &&
+      !contains(github.event.head_commit.message, 'ci skip')
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
-      - name: Prepare repository
-        run: git fetch --unshallow --tags
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
 
-      - uses: actions/setup-node@v6
+      - name: Setup Node
+        uses: actions/setup-node@v6
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
-
-      # Ensure npm 11.5.1 or later is installed
-      - name: Update npm
-        run: npm install -g npm@latest
-
-      - uses: oven-sh/setup-bun@v2
-        name: Install Bun
-
-      - uses: actions/cache@v5
-        name: Setup Bun cache
-        with:
-          path: ~/.bun/install/cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-bun-
+          cache: pnpm
 
       - name: Install dependencies
-        run: bun install
+        run: pnpm install --frozen-lockfile
 
-      - name: Run tests
-        run: bun test
+      - name: Build
+        run: pnpm --filter sbox-sdk build
 
-      - name: Build SDK
-        run: bun run build --filter sbox-sdk
+      - name: Test
+        run: pnpm --filter sbox-sdk test
 
-      - name: Create Release PR or Publish to NPM
-        id: changesets
-        uses: changesets/action@v1
-        with:
-          version: npm run changeset version
-          publish: npm run changeset publish
+      - name: Lint & typecheck
+        run: |
+          pnpm check
+          pnpm --filter sbox-sdk types
+
+      - name: Decide version bump
+        id: bump
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: "" # Workaround for https://github.com/changesets/action/pull/545
+          MSG: ${{ github.event.head_commit.message }}
+        run: |
+          level=patch
+          if printf '%s' "$MSG" | grep -qiE '#major'; then
+            level=major
+          elif printf '%s' "$MSG" | grep -qiE '#minor'; then
+            level=minor
+          fi
+          echo "level=$level" >> "$GITHUB_OUTPUT"
+          echo "Bump level: $level"
 
-      - name: Deploy web to Vercel
-        if: steps.changesets.outputs.published == 'true'
+      - name: Bump version
+        id: version
+        working-directory: packages/sbox-sdk
+        run: |
+          new=$(npm version "${{ steps.bump.outputs.level }}" --no-git-tag-version)
+          echo "version=${new#v}" >> "$GITHUB_OUTPUT"
+          echo "New version: $new"
+
+      - name: Publish to npm
+        working-directory: packages/sbox-sdk
+        run: npm publish --access public
         env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-        run: bunx vercel --prod --token=$VERCEL_TOKEN
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Commit and tag release
+        env:
+          V: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/sbox-sdk/package.json
+          git commit -m "chore(release): v$V [skip actions]"
+          git tag -a "v$V" -m "v$V"
+          git push origin HEAD:main
+          git push origin "v$V"

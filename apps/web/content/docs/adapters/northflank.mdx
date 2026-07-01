@@ -38,11 +38,11 @@ A sandbox is a **deployment service** that runs the base [`template`](/templates
 
 <Callout type="warn">
   Node-only: the SDK streams exec output over Node `EventEmitter`s, which the
-  adapter buffers. `exec` has no per-command `cwd`/`env`, so the core folds those
-  into a `cd … && KEY=v …` wrapper (`perCommandEnvCwd: false`) and `streaming`
-  is emulated. Files are read and written via `exec` + `base64`. `pause()` scales
-  the service to zero (volume retained, **memory lost**); `destroy()` deletes the
-  service and its child objects.
+  adapter buffers. `exec` has no per-command `cwd`/`env`, so the core folds
+  those into a `cd … && KEY=v …` wrapper (`perCommandEnvCwd: false`) and
+  `streaming` is emulated. Files are read and written via `exec` + `base64`.
+  `pause()` scales the service to zero (volume retained, **memory lost**);
+  `destroy()` deletes the service and its child objects.
 </Callout>
 
 ## Authentication
@@ -58,15 +58,15 @@ A sandbox is a **deployment service** that runs the base [`template`](/templates
 
 ## Capabilities
 
-| Capability          |    Level    | Notes                              |
-| ------------------- | :---------: | ---------------------------------- |
-| `list`              |   native    |                                    |
-| `pause`             |   native    | scale-to-zero (volume kept)        |
-| `streaming`         |  emulated   | exec session is buffered           |
-| `filesUpload`       |   native    | via `exec` + base64                |
-| `exposePort`        |   native    | public service port → DNS          |
-| `codeInterpreter`   | unsupported |                                    |
-| `stop` / `setTimeout` | unsupported | `pause` is the keep-disk state   |
-| `snapshot` / `fork` | unsupported | services platform, no VM snapshots |
+| Capability            |    Level    | Notes                              |
+| --------------------- | :---------: | ---------------------------------- |
+| `list`                |   native    |                                    |
+| `pause`               |   native    | scale-to-zero (volume kept)        |
+| `streaming`           |  emulated   | exec session is buffered           |
+| `filesUpload`         |   native    | via `exec` + base64                |
+| `exposePort`          |   native    | public service port → DNS          |
+| `codeInterpreter`     | unsupported |                                    |
+| `stop` / `setTimeout` | unsupported | `pause` is the keep-disk state     |
+| `snapshot` / `fork`   | unsupported | services platform, no VM snapshots |
 
 `perCommandEnvCwd` is `false` (core wraps); `preservesMemoryOnPause` is `false`; `previewModel` is `subdomain`.

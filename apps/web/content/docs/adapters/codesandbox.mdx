@@ -36,12 +36,12 @@ await sandbox.pause(); // hibernate — VM state snapshotted, resumes in ~2–3s
 [`template`](/templates) is a sandbox/template id to fork from (defaults to CodeSandbox's universal template). The SDK splits into a control object (`sdk.sandboxes.*`) and a per-sandbox `client` from `connect()` — the adapter manages both.
 
 <Callout type="info">
-  Filesystem is native (`client.fs.*`). `commands.run` is buffered and **throws**
-  a `CommandError` on a non-zero exit — the adapter catches it and emits a normal
-  exit event, so `sandbox.commands.run` never throws on non-zero (it returns an
-  `ExecResult` with the real `exitCode`). `pause()` hibernates (memory
-  snapshotted), `resume()` wakes it, `setTimeout()` sets the hibernation timeout,
-  and `destroy()` shuts it down.
+  Filesystem is native (`client.fs.*`). `commands.run` is buffered and
+  **throws** a `CommandError` on a non-zero exit — the adapter catches it and
+  emits a normal exit event, so `sandbox.commands.run` never throws on non-zero
+  (it returns an `ExecResult` with the real `exitCode`). `pause()` hibernates
+  (memory snapshotted), `resume()` wakes it, `setTimeout()` sets the hibernation
+  timeout, and `destroy()` shuts it down.
 </Callout>
 
 ## Authentication
@@ -57,15 +57,15 @@ await sandbox.pause(); // hibernate — VM state snapshotted, resumes in ~2–3s
 
 ## Capabilities
 
-| Capability          |    Level    | Notes                          |
-| ------------------- | :---------: | ------------------------------ |
-| `list`              |   native    |                                |
-| `pause`             |   native    | hibernate (memory snapshotted) |
-| `setTimeout`        |   native    | hibernation timeout            |
-| `filesUpload`       |   native    | native `client.fs`             |
+| Capability          |    Level    | Notes                            |
+| ------------------- | :---------: | -------------------------------- |
+| `list`              |   native    |                                  |
+| `pause`             |   native    | hibernate (memory snapshotted)   |
+| `setTimeout`        |   native    | hibernation timeout              |
+| `filesUpload`       |   native    | native `client.fs`               |
 | `exposePort`        |   native    | preview at `<id>-<port>.csb.app` |
-| `privatePreview`    |   native    | signed preview tokens          |
-| `codeInterpreter`   | unsupported |                                |
+| `privatePreview`    |   native    | signed preview tokens            |
+| `codeInterpreter`   | unsupported |                                  |
 | `snapshot` / `fork` | unsupported | hibernate is the memory snapshot |
 
 `perCommandEnvCwd` is `true` (`commands.run` takes `cwd`/`env`); `preservesMemoryOnPause` is `true`; `previewModel` is `subdomain`.

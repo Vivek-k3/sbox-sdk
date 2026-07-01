@@ -20,7 +20,7 @@
  * ```
  */
 import type { FrameworkAdapter, ToolSetOptions } from "../agent-tools/index.js";
-import type { SandboxPlugin } from "../internal/plugin.js";
+import type { PluginSetupContext, SandboxPlugin } from "../internal/plugin.js";
 
 export interface AIOptions<TTools> extends ToolSetOptions {
   /** The agent framework to target — `aiSdk()`, `openaiAgents()`, … */
@@ -28,15 +28,50 @@ export interface AIOptions<TTools> extends ToolSetOptions {
 }
 
 /**
+ * Merge per-sandbox overrides from `client.create(spec, options)` over the
+ * plugin's client-wide defaults. Only `policy`, `only`, and `forbid` are honored
+ * — never the framework. `policy` is shallow-merged so a single sandbox can
+ * tighten its trust posture; `only`/`forbid` are replaced when provided. This is
+ * what makes an untrusted sandbox's policy actually take effect rather than
+ * silently inheriting the laxer client default.
+ */
+function resolveToolOptions(
+  base: ToolSetOptions,
+  createOptions: PluginSetupContext["createOptions"]
+): ToolSetOptions {
+  if (!createOptions) {
+    return base;
+  }
+  const override = createOptions as Partial<ToolSetOptions>;
+  const merged: ToolSetOptions = { ...base };
+  if (override.policy) {
+    merged.policy = { ...base.policy, ...override.policy };
+  }
+  if (override.only) {
+    merged.only = override.only;
+  }
+  if (override.forbid) {
+    merged.forbid = override.forbid;
+  }
+  return merged;
+}
+
+/**
  * The single AI-provider plugin. Shapes `sandbox.tools` for the given framework,
- * capability-gated to the provider and gated by the optional `policy`.
+ * capability-gated to the provider and gated by the optional `policy`. Per-sandbox
+ * overrides passed to `client.create(spec, options)` are merged over the defaults.
  */
 export function ai<TTools>(
   opts: AIOptions<TTools>
 ): SandboxPlugin<{ tools: TTools }> {
   const { framework, ...toolOptions } = opts;
   return {
-    extend: (sandbox) => ({ tools: framework.build(sandbox, toolOptions) }),
+    extend: (sandbox, ctx) => ({
+      tools: framework.build(
+        sandbox,
+        resolveToolOptions(toolOptions, ctx.createOptions)
+      ),
+    }),
     kind: "ai-provider",
     name: `ai:${framework.name}`,
   };

@@ -14,12 +14,12 @@ if (sandbox.ports) {
 
 ## Methods
 
-| Method     | Signature                                   | Notes                                                                   |
-| ---------- | ------------------------------------------- | ----------------------------------------------------------------------- |
-| `expose`   | `(port, { private? }) => Promise<Preview>`  | Returns the preview URL                                                 |
-| `unexpose` | `(port) => Promise<void>`                   |                                                                         |
-| `list`     | `() => Promise<Preview[]>`                  |                                                                         |
-| `fetch`    | `(port, path?, init?) => Promise<Response>` | Proxy a request through the sandbox (where `proxiedFetch` is supported) |
+| Method     | Signature                                   | Notes                                                                                                                 |
+| ---------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `expose`   | `(port, { private? }) => Promise<Preview>`  | Returns the preview URL                                                                                               |
+| `unexpose` | `(port) => Promise<void>`                   |                                                                                                                       |
+| `list`     | `() => Promise<Preview[]>`                  |                                                                                                                       |
+| `fetch`    | `(port, path?, init?) => Promise<Response>` | Proxy a request through the sandbox — native proxy where `proxiedFetch` is supported, else via an exposed preview URL |
 
 ## `Preview`
 

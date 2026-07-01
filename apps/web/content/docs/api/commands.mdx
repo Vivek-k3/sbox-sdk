@@ -61,4 +61,4 @@ type OutputEvent =
 | `kill`    | `(processId, signal?) => Promise<void>` |                               |
 | `list`    | `() => Promise<ProcessInfo[]>`          |                               |
 
-`spawn`, `connect`, and `kill` require the `background` / `killProcess` capabilities — they throw `NotSupportedError` on providers that lack them.
+`spawn` requires the `background` capability and `kill` requires `killProcess`; `connect` and `list` depend on the adapter implementing them. Each throws `NotSupportedError` on providers that don't support it.

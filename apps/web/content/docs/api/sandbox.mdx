@@ -7,20 +7,20 @@ A `Sandbox` is what `client.create()` and `client.connect()` return. It groups e
 
 ## Members
 
-| Member                                                 | Type                                | Presence                             |
-| ------------------------------------------------------ | ----------------------------------- | ------------------------------------ |
-| `id` / `name?` / `provider`                            | `string`                            | always                               |
-| `capabilities`                                         | `Capabilities`                      | always                               |
-| `commands`                                             | `CommandsAPI`                       | **always** (universal)               |
-| `files`                                                | `FilesAPI`                          | **always** (native or polyfilled)    |
-| `ports`                                                | `PortsAPI \| undefined`             | gated on `exposePort`                |
-| `code`                                                 | `CodeAPI \| undefined`              | gated on `codeInterpreter`           |
-| `snapshots`                                            | `SnapshotsAPI \| undefined`         | gated on `snapshot`                  |
-| `network`                                              | `NetworkAPI \| undefined`           | gated on `egressControl`             |
-| `getInfo`                                              | `() => Promise<SandboxInfo>`        | always                               |
-| `setTimeout` / `stop` / `pause` / `resume` / `destroy` | `(…) => Promise<void>`              | always (runtime-gated)               |
-| `can`                                                  | `<K>(cap: K) => this is Sandbox<…>` | runtime check + type guard           |
-| `raw`                                                  | `() => Raw`                         | the native client, typed per adapter |
+| Member                                     | Type                                | Presence                                                          |
+| ------------------------------------------ | ----------------------------------- | ----------------------------------------------------------------- |
+| `id` / `name?` / `provider`                | `string`                            | always                                                            |
+| `capabilities`                             | `Capabilities`                      | always                                                            |
+| `commands`                                 | `CommandsAPI`                       | **always** (universal)                                            |
+| `files`                                    | `FilesAPI`                          | **always** (native or polyfilled)                                 |
+| `ports`                                    | `PortsAPI \| undefined`             | gated on `exposePort`                                             |
+| `code`                                     | `CodeAPI \| undefined`              | gated on `codeInterpreter`                                        |
+| `snapshots`                                | `SnapshotsAPI \| undefined`         | gated on `snapshot`                                               |
+| `network`                                  | `NetworkAPI \| undefined`           | gated on `egressControl`                                          |
+| `getInfo` / `destroy`                      | `() => Promise<…>`                  | always                                                            |
+| `setTimeout` / `stop` / `pause` / `resume` | `(…) => Promise<void>`              | present, but throw `NotSupported` where the capability is missing |
+| `can`                                      | `<K>(cap: K) => this is Sandbox<…>` | runtime check + type guard                                        |
+| `raw`                                      | `() => Raw`                         | the native client, typed per adapter                              |
 
 ## Capability gating
 

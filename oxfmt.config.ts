@@ -7,6 +7,6 @@ export default defineConfig({
     "apps/web/components/ui",
     "apps/web/lib/utils.ts",
     "apps/web/hooks/use-mobile.ts",
-    "packages/files-sdk/CHANGELOG.md",
+    "packages/sbox-sdk/CHANGELOG.md",
   ],
 });

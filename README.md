@@ -1,159 +1,149 @@
-# Turborepo starter
+# sbox-sdk
 
-This Turborepo starter is maintained by the Turborepo core team.
+**One unified SDK for agent sandbox providers.** Write your code against a stable
+`Sandbox` / `SandboxClient` interface — swap the adapter import to change
+provider, and the rest of your code stays the same.
 
-## Using this example
+> Status: **alpha** (`0.0.x`). The core, the in-memory provider, and 14 provider
+> adapters ship today. E2B is the most battle-tested; newer adapters pass the
+> shared conformance suite offline but are less proven against live APIs.
 
-Run the following command:
+📚 **Docs:** [sbox-sdk.dev](https://sbox-sdk.dev)
 
-```sh
-npx create-turbo@latest
+## Install
+
+```bash
+npm install sbox-sdk
+# then install the provider SDK you use (an optional peer dependency):
+npm install @e2b/code-interpreter
 ```
 
-## What's inside?
+## Quickstart
 
-This Turborepo includes the following packages/apps:
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { e2b } from "sbox-sdk/e2b";
 
-### Apps and Packages
+const client = createSandboxClient({
+  provider: e2b({ apiKey: process.env.E2B_API_KEY! }),
+});
+const sandbox = await client.create({ template: "python-3.12", ttlMs: 60_000 });
 
-- `docs`: a [Next.js](https://nextjs.org/) app
-- `web`: another [Next.js](https://nextjs.org/) app
-- `@repo/ui`: a stub React component library shared by both `web` and `docs` applications
-- `@repo/eslint-config`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
-- `@repo/typescript-config`: `tsconfig.json`s used throughout the monorepo
+// exec — await for a buffered result (never throws on non-zero exit):
+const res = await sandbox.commands.run("echo hi", { cwd: "/app" });
+console.log(res.exitCode, res.stdout);
 
-Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
+// ...or for-await the SAME handle to stream live:
+for await (const ev of sandbox.commands.run(["python", "train.py"])) {
+  if (ev.type === "stdout") process.stdout.write(ev.data);
+}
 
-### Utilities
+// filesystem (web-standard bodies in, StoredFile out):
+await sandbox.files.write("/app/data.json", JSON.stringify({ ok: true }));
+const text = await (await sandbox.files.read("/app/data.json")).text();
 
-This Turborepo has some additional tools already setup for you:
-
-- [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
-- [Prettier](https://prettier.io) for code formatting
-
-### Build
-
-To build all apps and packages, run the following command:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo build
+await sandbox.destroy();
+await client.dispose();
 ```
 
-Without global `turbo`, use your package manager:
+Zero config? `createSandboxClient()` defaults to a built-in in-memory provider —
+great for tests and local dev:
 
-```sh
-cd my-turborepo
-npx turbo build
-pnpm dlx turbo build
-pnpm exec turbo build
+```ts
+const sb = await createSandboxClient().create();
+await sb.commands.run("echo works offline");
 ```
 
-You can build a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
+## Swap providers, keep your code
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo build --filter=docs
+```ts
+import { vercel } from "sbox-sdk/vercel";
+const client = createSandboxClient({
+  provider: vercel({ token, teamId, projectId }),
+});
+// every sandbox.commands / sandbox.files call site above is unchanged
 ```
 
-Without global `turbo`:
+Each provider declares a static **capability table**. Sub-APIs a provider can't
+do are typed `undefined` (a compile error to call), and unsupported features
+throw `NotSupportedError` before any network call.
 
-```sh
-npx turbo build --filter=docs
-pnpm exec turbo build --filter=docs
-pnpm exec turbo build --filter=docs
+## Providers
+
+| Provider    | Import                 | Peer SDK                          |
+| ----------- | ---------------------- | --------------------------------- |
+| E2B         | `sbox-sdk/e2b`         | `@e2b/code-interpreter`           |
+| Vercel      | `sbox-sdk/vercel`      | `@vercel/sandbox`                 |
+| Cloudflare  | `sbox-sdk/cloudflare`  | `@cloudflare/sandbox`             |
+| Daytona     | `sbox-sdk/daytona`     | `@daytonaio/sdk`                  |
+| Modal       | `sbox-sdk/modal`       | `modal`                           |
+| Fly         | `sbox-sdk/fly`         | _none (REST)_                     |
+| AWS Lambda  | `sbox-sdk/aws-lambda`  | `@aws-sdk/client-lambda-microvms` |
+| Northflank  | `sbox-sdk/northflank`  | `@northflank/js-client`           |
+| Runloop     | `sbox-sdk/runloop`     | `@runloop/api-client`             |
+| CodeSandbox | `sbox-sdk/codesandbox` | `@codesandbox/sdk`                |
+| Morph       | `sbox-sdk/morph`       | `morphcloud`                      |
+| Blaxel      | `sbox-sdk/blaxel`      | `@blaxel/core`                    |
+| Beam        | `sbox-sdk/beam`        | `@beamcloud/beam-js`              |
+| Railway     | `sbox-sdk/railway`     | `railway`                         |
+
+The in-memory provider (`sbox-sdk/memory`, also the zero-config default) needs no peer.
+
+## AI agent tools
+
+Turn any sandbox into a framework-shaped tool set with a risk/approval policy:
+
+```ts
+import { ai } from "sbox-sdk/ai";
+import { aiSdk } from "sbox-sdk/ai-sdk";
+
+const client = createSandboxClient({
+  provider: e2b(),
+  plugins: [
+    ai({ framework: aiSdk(), policy: { defaults: { destructive: "ask" } } }),
+  ],
+});
+const sandbox = await client.create();
+// sandbox.tools is typed for the Vercel AI SDK, capability-gated + policy-aware
 ```
 
-### Develop
+Adapters ship for the Vercel AI SDK, Mastra, OpenAI Agents, Anthropic, and
+LangChain. See the [AI docs](https://sbox-sdk.dev/ai/overview).
 
-To develop all apps and packages, run the following command:
+## CLI
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
+The package ships a `sbox` bin. `caps` and `doctor` run fully offline:
 
-```sh
-cd my-turborepo
-turbo dev
+```bash
+npx sbox caps e2b              # print a provider's capability matrix
+npx sbox doctor e2b           # check node + whether the provider SDK is installed
+npx sbox exec e2b -- echo hi  # run one command in a fresh sandbox
+npx sbox list e2b             # list live sandboxes
 ```
 
-Without global `turbo`, use your package manager:
+## Monorepo layout
 
-```sh
-cd my-turborepo
-npx turbo dev
-pnpm exec turbo dev
-pnpm exec turbo dev
+This is a pnpm + Turborepo monorepo (Node >= 20):
+
+- `packages/sbox-sdk` — the SDK itself (core router, adapters, agent-tools, AI layer, CLI).
+- `packages/config` — shared `tsconfig.base.json`.
+- `apps/web` — the docs + marketing site ([sbox-sdk.dev](https://sbox-sdk.dev)).
+
+## Development
+
+```bash
+pnpm install
+pnpm build        # turbo build
+pnpm test         # turbo test (SDK unit tests run fully offline)
+pnpm types        # typecheck (tsgo)
+pnpm check        # lint + format (ultracite = oxlint + oxfmt)
+pnpm fix          # auto-fix lint + format
 ```
 
-You can develop a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
+Releases are automated: every merge to `main` publishes the next patch of
+`sbox-sdk` to npm. Put `#minor` or `#major` in the merge commit / PR title to
+bump those instead.
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
+## License
 
-```sh
-turbo dev --filter=web
-```
-
-Without global `turbo`:
-
-```sh
-npx turbo dev --filter=web
-pnpm exec turbo dev --filter=web
-pnpm exec turbo dev --filter=web
-```
-
-### Remote Caching
-
-> [!TIP]
-> Vercel Remote Cache is free for all plans. Get started today at [vercel.com](https://vercel.com/signup?utm_source=remote-cache-sdk&utm_campaign=free_remote_cache).
-
-Turborepo can use a technique known as [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching) to share cache artifacts across machines, enabling you to share build caches with your team and CI/CD pipelines.
-
-By default, Turborepo will cache locally. To enable Remote Caching you will need an account with Vercel. If you don't have an account you can [create one](https://vercel.com/signup?utm_source=turborepo-examples), then enter the following commands:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo login
-```
-
-Without global `turbo`, use your package manager:
-
-```sh
-cd my-turborepo
-npx turbo login
-pnpm exec turbo login
-pnpm exec turbo login
-```
-
-This will authenticate the Turborepo CLI with your [Vercel account](https://vercel.com/docs/concepts/personal-accounts/overview).
-
-Next, you can link your Turborepo to your Remote Cache by running the following command from the root of your Turborepo:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo link
-```
-
-Without global `turbo`:
-
-```sh
-npx turbo link
-pnpm exec turbo link
-pnpm exec turbo link
-```
-
-## Useful Links
-
-Learn more about the power of Turborepo:
-
-- [Tasks](https://turborepo.dev/docs/crafting-your-repository/running-tasks)
-- [Caching](https://turborepo.dev/docs/crafting-your-repository/caching)
-- [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching)
-- [Filtering](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters)
-- [Configuration Options](https://turborepo.dev/docs/reference/configuration)
-- [CLI Usage](https://turborepo.dev/docs/reference/command-line-reference)
+[MIT](./LICENSE) © Vivek Kornepalli

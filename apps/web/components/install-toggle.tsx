@@ -10,7 +10,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { convertNpmCommand, type PackageManager } from "@/lib/convert-npm";
+import { convertNpmCommand } from "@/lib/convert-npm";
+import type { PackageManager } from "@/lib/convert-npm";
 import { cn } from "@/lib/utils";
 
 const NPM_COMMAND = "npm install sbox-sdk";
@@ -33,14 +34,18 @@ const COPY_BTN =
  */
 export const InstallToggle = ({ className }: { className?: string }) => {
   const [mode, setMode] = useState<Mode>("humans");
-  const [copiedManager, setCopiedManager] = useState<PackageManager | null>(null);
+  const [copiedManager, setCopiedManager] = useState<PackageManager | null>(
+    null
+  );
   const [copiedAgent, setCopiedAgent] = useState(false);
 
   const humanCommand = convertNpmCommand(NPM_COMMAND, DEFAULT_MANAGER);
 
   const copyHuman = async (manager: PackageManager) => {
     try {
-      await navigator.clipboard.writeText(convertNpmCommand(NPM_COMMAND, manager));
+      await navigator.clipboard.writeText(
+        convertNpmCommand(NPM_COMMAND, manager)
+      );
       setCopiedManager(manager);
       setTimeout(() => setCopiedManager(null), 1800);
     } catch {
@@ -129,12 +134,18 @@ export const InstallToggle = ({ className }: { className?: string }) => {
           <span>{AGENT_COMMAND}</span>
           <span aria-hidden className="h-4 w-px bg-border" />
           <button
-            aria-label={copiedAgent ? "Copied install command" : "Copy install command"}
+            aria-label={
+              copiedAgent ? "Copied install command" : "Copy install command"
+            }
             className={COPY_BTN}
             onClick={copyAgent}
             type="button"
           >
-            {copiedAgent ? <Check className="size-4" /> : <Copy className="size-4" />}
+            {copiedAgent ? (
+              <Check className="size-4" />
+            ) : (
+              <Copy className="size-4" />
+            )}
           </button>
         </div>
       )}

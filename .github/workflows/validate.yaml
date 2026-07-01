@@ -6,9 +6,6 @@ on:
   pull_request:
     branches:
       - main
-  push:
-    branches:
-      - changeset-release/main
 
 jobs:
   build:
@@ -130,8 +127,6 @@ jobs:
 
   build-web:
     runs-on: ubuntu-latest
-
-    
 
     steps:
       - name: Checkout

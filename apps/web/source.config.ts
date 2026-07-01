@@ -30,7 +30,10 @@ export default defineConfig({
           command: (cmd: string) => convertNpmCommand(cmd, "bun"),
           name: "bun",
         },
-        { command: (cmd: string) => convertNpmCommand(cmd, "npm"), name: "npm" },
+        {
+          command: (cmd: string) => convertNpmCommand(cmd, "npm"),
+          name: "npm",
+        },
         {
           command: (cmd: string) => convertNpmCommand(cmd, "yarn"),
           name: "yarn",

@@ -10,18 +10,13 @@
  * exec. Ports are preview URLs (`previews.createIfNotExists`, public or private).
  * Requires the optional peer dependency `@blaxel/core`.
  */
-import {
-  AsyncQueue,
-  defineProvider,
-  SandboxError,
-} from "../adapter/index.js";
+import { AsyncQueue, defineProvider, SandboxError } from "../adapter/index.js";
 import type {
   CapabilityFlags,
   CapabilityMap,
   DirEntry,
   DriverExec,
   DriverHandle,
-  ExecOptions,
   OutputEvent,
   Preview,
   SandboxInfo,
@@ -125,7 +120,9 @@ interface BlaxelStatic {
   delete(name: string): Promise<void>;
 }
 
-type BlaxelModule = { SandboxInstance: BlaxelStatic };
+interface BlaxelModule {
+  SandboxInstance: BlaxelStatic;
+}
 let cached: BlaxelModule | null = null;
 async function loadBlaxel(): Promise<BlaxelModule> {
   if (!cached) {
@@ -173,7 +170,7 @@ function entryName(e: { path?: string; name?: string } | string): string {
   if (typeof e === "string") {
     return e;
   }
-  return e.name ?? (e.path ? e.path.split("/").pop() ?? e.path : "");
+  return e.name ?? (e.path ? (e.path.split("/").pop() ?? e.path) : "");
 }
 
 export const blaxel = defineProvider<BlaxelCaps, BlaxelInstance, BlaxelOptions>(

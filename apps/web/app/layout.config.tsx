@@ -27,14 +27,6 @@ const Logo = (props: SVGProps<SVGSVGElement>) => (
 
 export const baseOptions: BaseLayoutProps = {
   githubUrl: "https://github.com/vivek-k3/sbox-sdk",
-  links: [
-    { text: "Overview", url: "/general/overview" },
-    { text: "Adapters", url: "/adapters/memory" },
-    { text: "Plugins", url: "/plugins/overview" },
-    { text: "AI", url: "/ai/overview" },
-    { text: "API", url: "/api/client" },
-    { text: "Capabilities", url: "/general/capabilities" },
-  ],
   nav: {
     title: (
       <div className="flex items-center gap-1.5 whitespace-nowrap shrink-0">

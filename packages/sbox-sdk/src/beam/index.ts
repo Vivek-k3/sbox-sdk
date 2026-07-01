@@ -28,7 +28,6 @@ import type {
   SandboxInfo,
   SandboxProvider,
   SandboxSpec,
-  SandboxState,
   SnapshotRef,
 } from "../adapter/index.js";
 
@@ -125,7 +124,9 @@ async function loadBeam(): Promise<BeamModule> {
   return cached;
 }
 
-async function readAll(stream: BeamStream | string | undefined): Promise<string> {
+async function readAll(
+  stream: BeamStream | string | undefined
+): Promise<string> {
   if (!stream) {
     return "";
   }
@@ -145,7 +146,7 @@ async function readAll(stream: BeamStream | string | undefined): Promise<string>
     let s = "";
     for (;;) {
       const c = await stream.read();
-      if (c == null) {
+      if (c === null || c === undefined) {
         break;
       }
       s += decode(c);
@@ -306,8 +307,13 @@ export const beam = defineProvider<BeamCaps, BeamInstance, BeamOptions>(
             "1Gi",
           gpu: spec.resources?.gpu,
           ports: spec.ports,
-          keepWarmSeconds: spec.ttlMs ? Math.ceil(spec.ttlMs / 1000) : undefined,
-          image: image && mod.Image ? new mod.Image({ baseImage: image }) : undefined,
+          keepWarmSeconds: spec.ttlMs
+            ? Math.ceil(spec.ttlMs / 1000)
+            : undefined,
+          image:
+            image && mod.Image
+              ? new mod.Image({ baseImage: image })
+              : undefined,
         });
         return makeHandle(await sandbox.create());
       },

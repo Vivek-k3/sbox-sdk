@@ -81,7 +81,9 @@ export const AuthEnv = ({ provider }: { provider: string }) => {
         </div>
       )}
 
-      {auth.notes ? <p className="mt-3 text-dim text-xs">{auth.notes}</p> : null}
+      {auth.notes ? (
+        <p className="mt-3 text-dim text-xs">{auth.notes}</p>
+      ) : null}
     </div>
   );
 };

@@ -9,10 +9,10 @@ export default defineConfig({
     "apps/web/components/ui",
     "apps/web/lib/utils.ts",
     "apps/web/hooks/use-mobile.ts",
-    "packages/files-sdk/CHANGELOG.md",
+    "packages/sbox-sdk/CHANGELOG.md",
     // Svelte test fixtures — oxlint has no Svelte parser, so `.svelte` source
     // trips JS-only rules (`export let` props, etc.).
-    "packages/files-sdk/test/fixtures",
+    "packages/sbox-sdk/test/fixtures",
     "packages/sbox-sdk/src/aws-lambda/runner/server.mjs",
   ],
   overrides: [

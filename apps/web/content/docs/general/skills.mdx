@@ -52,7 +52,7 @@ Set up sbox-sdk (https://sbox-sdk.dev) in this project.
      import { createSandboxClient } from "sbox-sdk";
      import { e2b } from "sbox-sdk/e2b";
      const client = createSandboxClient({ provider: e2b({ apiKey: process.env.E2B_API_KEY! }) });
-     const sandbox = await client.create({ template: "node", ttlMs: 60_000 });
+     const sandbox = await client.create({ template: "python-3.12", ttlMs: 60_000 });
 3. Use sandbox.commands.run(cmd) (it never throws on a non-zero exit — read exitCode),
    sandbox.files.{read,write,list}, and sandbox.code?.runCode(...) where supported.
    Capability-gated namespaces (code, ports, snapshots, network) are `undefined` when

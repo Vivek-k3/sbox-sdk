@@ -77,7 +77,8 @@ Claude has no native human-in-the-loop, so this adapter enforces the [policy](/a
 
 ```ts
 plugins: [
-  anthropic({
+  ai({
+    framework: anthropic(),
     policy: {
       defaults: { destructive: "ask" },
       onApprovalRequest: async (req) => askUser(req.title),

@@ -9,17 +9,12 @@
  * it (in-place restore is unsupported). Ports are tunnels (`enableTunnel`).
  * Requires the optional peer dependency `@runloop/api-client`.
  */
-import {
-  AsyncQueue,
-  defineProvider,
-  SandboxError,
-} from "../adapter/index.js";
+import { AsyncQueue, defineProvider, SandboxError } from "../adapter/index.js";
 import type {
   CapabilityFlags,
   CapabilityMap,
   DriverExec,
   DriverHandle,
-  ExecOptions,
   OutputEvent,
   Preview,
   SandboxInfo,
@@ -96,7 +91,9 @@ interface RunloopClient {
   devboxes: {
     create(params: Record<string, unknown>): Promise<DevboxView>;
     retrieve(id: string): Promise<DevboxView>;
-    list(params?: Record<string, unknown>): Promise<{ devboxes?: DevboxView[] }>;
+    list(
+      params?: Record<string, unknown>
+    ): Promise<{ devboxes?: DevboxView[] }>;
     executeSync(
       id: string,
       params: { command: string; shell_name?: string }
@@ -115,7 +112,9 @@ interface RunloopClient {
   };
 }
 
-type RunloopModule = { default: new (opts: Record<string, unknown>) => RunloopClient };
+interface RunloopModule {
+  default: new (opts: Record<string, unknown>) => RunloopClient;
+}
 let cached: RunloopModule | null = null;
 async function loadRunloop(): Promise<RunloopModule> {
   if (!cached) {
@@ -287,7 +286,9 @@ export const runloop = defineProvider<RunloopCaps, DevboxView, RunloopOptions>(
         const devbox = await client.devboxes.create(params);
         // Best-effort wait for the devbox to finish provisioning.
         for (let i = 0; i < 30 && devbox.status !== "running"; i++) {
-          const got = await client.devboxes.retrieve(devbox.id).catch(() => null);
+          const got = await client.devboxes
+            .retrieve(devbox.id)
+            .catch(() => null);
           if (!got) {
             break;
           }

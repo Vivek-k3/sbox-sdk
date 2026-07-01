@@ -62,7 +62,8 @@ This adapter enforces the [policy](/ai/approval) inside the tool function via `p
 
 ```ts
 plugins: [
-  langchain({
+  ai({
+    framework: langchain(),
     policy: {
       defaults: { destructive: "ask" },
       onApprovalRequest: async (req) => askUser(req.title),

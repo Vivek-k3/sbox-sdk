@@ -83,7 +83,9 @@ vi.mock("@codesandbox/sdk", () => ({
 
 describe("codesandbox adapter (e2e via mocked SDK)", () => {
   it("runs commands (incl. non-zero), round-trips a file, exposes a port", async () => {
-    const client = createSandboxClient({ provider: codesandbox({ apiKey: "k" }) });
+    const client = createSandboxClient({
+      provider: codesandbox({ apiKey: "k" }),
+    });
     const sandbox = await client.create();
     expect(sandbox.id).toBe("csb-1");
 

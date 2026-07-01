@@ -19,7 +19,8 @@
   "files": [
     "dist",
     "src/aws-lambda/runner",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "type": "module",
   "sideEffects": false,

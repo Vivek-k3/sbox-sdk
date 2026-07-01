@@ -90,6 +90,24 @@ describe("ai({ framework: aiSdk() }) plugin", () => {
     expect(Object.keys(sandbox.tools)).toContain("sbox_fs_read");
     expect(typeof sandbox.tools.sbox_exec!.execute).toBe("function");
   });
+
+  it("honors per-sandbox policy overrides from create(spec, options)", async () => {
+    const client = createSandboxClient({
+      plugins: [ai({ framework: aiSdk() })],
+      provider: memory(),
+    });
+    // Default client policy keeps the destructive tool present.
+    const open = await client.create();
+    expect(open.tools.sbox_fs_remove).toBeDefined();
+
+    // A per-sandbox `forbid` removes it for this sandbox only.
+    const locked = await client.create(undefined, {
+      forbid: ["sbox_fs_remove"],
+    });
+    expect(locked.tools.sbox_fs_remove).toBeUndefined();
+    // The other sandbox is unaffected by the override.
+    expect(open.tools.sbox_fs_remove).toBeDefined();
+  });
 });
 
 describe("toolApproval (AI SDK v7 forward-compat)", () => {
