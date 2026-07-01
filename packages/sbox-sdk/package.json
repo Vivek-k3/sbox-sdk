@@ -12,7 +12,16 @@
     "sandbox",
     "vercel-sandbox"
   ],
+  "homepage": "https://sbox-sdk.vercel.app",
+  "bugs": {
+    "url": "https://github.com/Vivek-k3/sbox-sdk/issues"
+  },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Vivek-k3/sbox-sdk.git",
+    "directory": "packages/sbox-sdk"
+  },
   "bin": {
     "sbox": "dist/cli.js"
   },

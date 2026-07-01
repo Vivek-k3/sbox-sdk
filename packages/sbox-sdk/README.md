@@ -1,8 +1,6 @@
-# sbox-sdk
+# sbox-sdk ![status: alpha](https://img.shields.io/badge/status-alpha-orange)
 
 One unified SDK for agent **sandbox** providers (E2B, Vercel Sandbox, Cloudflare Sandbox, and more). Write your code once; swap the adapter import to change provider — the rest of your code stays the same.
-
-> Status: **alpha** (`0.0.1`). Ships adapters for E2B, Vercel, Cloudflare, Daytona, Modal, Fly, AWS Lambda, Northflank, Runloop, CodeSandbox, Morph, Blaxel, Beam, and Railway — plus a built-in **in-memory** provider for tests/dev. E2B is the most battle-tested; the newer adapters pass the shared conformance suite offline but are less proven against live APIs.
 
 ## Install
 
