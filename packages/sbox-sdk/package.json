@@ -1,6 +1,6 @@
 {
   "name": "sbox-sdk",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "One unified SDK for agent sandbox providers (E2B, Vercel, Cloudflare, Daytona, Modal, and more) — swap the adapter import, keep your code.",
   "keywords": [
     "agent",
