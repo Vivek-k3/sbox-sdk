@@ -1,6 +1,13 @@
 name: Release
 
-# Auto-publishes sbox-sdk to npm on every merge to `main`.
+# Auto-publishes sbox-sdk to npm on merges to `main` that touch the package
+# (or anything that affects its build: shared config, the root toolchain
+# manifest, workspace layout, this workflow). The lockfile is deliberately NOT
+# a trigger — it changes on web/cookbook dep edits too, and the published
+# tarball (dist/ + package.json) doesn't depend on it. Web/docs/cookbook-only
+# commits deploy via Vercel, never cut a release. For anything the paths
+# filter can't see, run the workflow by hand from the Actions tab
+# (workflow_dispatch, with a bump-level picker).
 #
 # The bump is a PATCH by default (0.0.1 -> 0.0.2 -> 0.0.3 ...). To cut a minor
 # or major instead, put "#minor" or "#major" anywhere in the merge commit
@@ -18,6 +25,19 @@ permissions:
 on:
   push:
     branches: [main]
+    paths:
+      - "packages/sbox-sdk/**"
+      - "packages/config/**"
+      - "package.json"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/releases.yaml"
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump level"
+        type: choice
+        options: [patch, minor, major]
+        default: patch
 
 concurrency:
   group: release-${{ github.ref }}
@@ -28,11 +48,13 @@ jobs:
     runs-on: ubuntu-latest
 
     # Skip the workflow's own release commits and any explicit CI-skip request.
+    # Manual dispatches always run — asking for a release IS the intent.
     if: >-
-      !startsWith(github.event.head_commit.message, 'chore(release):') &&
+      github.event_name == 'workflow_dispatch' ||
+      (!startsWith(github.event.head_commit.message, 'chore(release):') &&
       !contains(github.event.head_commit.message, '[skip ci]') &&
       !contains(github.event.head_commit.message, 'skip ci') &&
-      !contains(github.event.head_commit.message, 'ci skip')
+      !contains(github.event.head_commit.message, 'ci skip'))
 
     steps:
       - name: Checkout
@@ -68,12 +90,17 @@ jobs:
         id: bump
         env:
           MSG: ${{ github.event.head_commit.message }}
+          # Set only on workflow_dispatch; empty on push.
+          DISPATCH_LEVEL: ${{ inputs.bump }}
         run: |
-          level=patch
-          if printf '%s' "$MSG" | grep -qiE '#major'; then
-            level=major
-          elif printf '%s' "$MSG" | grep -qiE '#minor'; then
-            level=minor
+          level="$DISPATCH_LEVEL"
+          if [ -z "$level" ]; then
+            level=patch
+            if printf '%s' "$MSG" | grep -qiE '#major'; then
+              level=major
+            elif printf '%s' "$MSG" | grep -qiE '#minor'; then
+              level=minor
+            fi
           fi
           echo "level=$level" >> "$GITHUB_OUTPUT"
           echo "Bump level: $level"
@@ -88,9 +115,17 @@ jobs:
 
       - name: Publish to npm
         working-directory: packages/sbox-sdk
-        run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          V: ${{ steps.version.outputs.version }}
+        # Skip if this version is already on npm, so a re-run after a failure
+        # later in the job (e.g. the push-back to main) doesn't die here.
+        run: |
+          if npm view "sbox-sdk@$V" version >/dev/null 2>&1; then
+            echo "sbox-sdk@$V already published; skipping."
+          else
+            npm publish --access public
+          fi
 
       - name: Commit and tag release
         env:
@@ -103,6 +138,10 @@ jobs:
           # built/tested/linted above, and the hooks assume a dev toolchain
           # (bun) that isn't present on the runner.
           git commit --no-verify -m "chore(release): v$V [skip actions]"
+          # main may have moved during the build/test steps; rebase the release
+          # commit onto it so the push below stays fast-forward. Tag after the
+          # rebase so it points at the commit that actually lands.
+          git pull --rebase origin main
           git tag -a "v$V" -m "v$V"
           git push origin HEAD:main
           git push origin "v$V"
