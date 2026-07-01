@@ -10,7 +10,7 @@ description: >-
   untrusted or model-generated code in isolation, or letting an LLM agent run
   commands/files/code safely.
 metadata:
-  homepage: https://sbox-sdk.dev
+  homepage: https://sbox-sdk.vercel.app
   repository: https://github.com/vivek-k3/sbox-sdk
 ---
 
@@ -130,11 +130,11 @@ await generateText({ model, prompt, tools: sandbox.tools });
 
 ## Reference documentation
 
-The docs are at <https://sbox-sdk.dev> and are available as plain markdown for LLMs:
+The docs are at <https://sbox-sdk.vercel.app> and are available as plain markdown for LLMs:
 
-- **Index for LLMs:** <https://sbox-sdk.dev/llms.txt>
+- **Index for LLMs:** <https://sbox-sdk.vercel.app/llms.txt>
 - **Any page as markdown:** append the path to `/llms.mdx`, e.g.
-  <https://sbox-sdk.dev/llms.mdx/general/usage>
+  <https://sbox-sdk.vercel.app/llms.mdx/general/usage>
 - Key pages: `/general/usage`, `/general/capabilities`, `/api/sandbox`,
   `/adapters/e2b`, `/ai/overview`.
 

@@ -8,7 +8,7 @@ provider, and the rest of your code stays the same.
 > adapters ship today. E2B is the most battle-tested; newer adapters pass the
 > shared conformance suite offline but are less proven against live APIs.
 
-📚 **Docs:** [sbox-sdk.dev](https://sbox-sdk.dev)
+📚 **Docs:** [sbox-sdk.vercel.app](https://sbox-sdk.vercel.app)
 
 ## Install
 
@@ -108,7 +108,7 @@ const sandbox = await client.create();
 ```
 
 Adapters ship for the Vercel AI SDK, Mastra, OpenAI Agents, Anthropic, and
-LangChain. See the [AI docs](https://sbox-sdk.dev/ai/overview).
+LangChain. See the [AI docs](https://sbox-sdk.vercel.app/ai/overview).
 
 ## CLI
 
@@ -127,7 +127,7 @@ This is a pnpm + Turborepo monorepo (Node >= 20):
 
 - `packages/sbox-sdk` — the SDK itself (core router, adapters, agent-tools, AI layer, CLI).
 - `packages/config` — shared `tsconfig.base.json`.
-- `apps/web` — the docs + marketing site ([sbox-sdk.dev](https://sbox-sdk.dev)).
+- `apps/web` — the docs + marketing site ([sbox-sdk.vercel.app](https://sbox-sdk.vercel.app)).
 
 ## Development
 

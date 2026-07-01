@@ -3,7 +3,7 @@ import { source } from "@/lib/source";
 export const revalidate = false;
 
 // Canonical site (matches metadataBase in app/layout.tsx).
-const SITE = "https://sbox-sdk.dev";
+const SITE = "https://sbox-sdk.vercel.app";
 
 const SECTION_TITLES: Record<string, string> = {
   adapters: "Adapters",

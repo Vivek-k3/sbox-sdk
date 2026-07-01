@@ -37,7 +37,7 @@ const description =
 
 export const metadata: Metadata = {
   description,
-  metadataBase: new URL("https://sbox-sdk.dev"),
+  metadataBase: new URL("https://sbox-sdk.vercel.app"),
   title: { default: title, template: "%s · sbox SDK" },
 };
 
