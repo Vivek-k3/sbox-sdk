@@ -110,6 +110,8 @@ export interface TelemetryOptions {
   flushAt?: number;
   /** Delay before flushing queued events. Mostly useful for tests. */
   flushIntervalMs?: number;
+  /** Maximum time to wait for a telemetry request before dropping it. */
+  requestTimeoutMs?: number;
 }
 
 export interface ExecResult {

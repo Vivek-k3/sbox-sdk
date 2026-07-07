@@ -37,6 +37,7 @@ const DEFAULT_POSTHOG_PROJECT_KEY =
   "phc_osTPjb7RBcKe5HmXcU6zgovnELKZGUpDXLQ4ftVLPEk4";
 const SDK_NAME = "sbox-sdk";
 const SDK_VERSION = pkg.version;
+const DEFAULT_REQUEST_TIMEOUT_MS = 1500;
 
 let processDistinctId: string | undefined;
 
@@ -83,9 +84,6 @@ function telemetryEnabled(
   }
   if (isFalsy(env("SBOX_TELEMETRY"))) {
     return false;
-  }
-  if (options.enabled === true || isTruthy(env("SBOX_TELEMETRY"))) {
-    return true;
   }
   return true;
 }
@@ -158,6 +156,10 @@ function safeProperties(
   };
 }
 
+function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
+  (timer as { unref?: () => void }).unref?.();
+}
+
 class NoopTelemetryReporter implements TelemetryReporter {
   track(): void {}
 
@@ -171,6 +173,7 @@ class PostHogTelemetryReporter implements TelemetryReporter {
   readonly #distinctId: string;
   readonly #flushAt: number;
   readonly #flushIntervalMs: number;
+  readonly #requestTimeoutMs: number;
   #queue: QueuedEvent[] = [];
   #timer: ReturnType<typeof setTimeout> | undefined;
   #inflight: Promise<void> | undefined;
@@ -182,6 +185,8 @@ class PostHogTelemetryReporter implements TelemetryReporter {
     this.#distinctId = distinctId(options);
     this.#flushAt = options.flushAt ?? 10;
     this.#flushIntervalMs = options.flushIntervalMs ?? 1000;
+    this.#requestTimeoutMs =
+      options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   }
 
   track(
@@ -199,10 +204,12 @@ class PostHogTelemetryReporter implements TelemetryReporter {
       return;
     }
     if (!this.#timer) {
-      this.#timer = setTimeout(() => {
+      const timer = setTimeout(() => {
         this.#timer = undefined;
         void this.flush();
       }, this.#flushIntervalMs);
+      unrefTimer(timer);
+      this.#timer = timer;
     }
   }
 
@@ -225,6 +232,15 @@ class PostHogTelemetryReporter implements TelemetryReporter {
   }
 
   async #send(batch: QueuedEvent[]): Promise<void> {
+    const controller =
+      this.#requestTimeoutMs > 0 ? new AbortController() : undefined;
+    const timeout =
+      controller && this.#requestTimeoutMs > 0
+        ? setTimeout(() => controller.abort(), this.#requestTimeoutMs)
+        : undefined;
+    if (timeout) {
+      unrefTimer(timeout);
+    }
     try {
       await this.#fetch(`${this.#host}/batch/`, {
         body: JSON.stringify({
@@ -236,9 +252,14 @@ class PostHogTelemetryReporter implements TelemetryReporter {
         headers: { "Content-Type": "application/json" },
         keepalive: true,
         method: "POST",
+        signal: controller?.signal,
       });
     } catch {
       // Telemetry must never affect SDK behavior.
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
     }
   }
 }
