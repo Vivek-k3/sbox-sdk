@@ -9,6 +9,7 @@ import {
 import type { ReactNode } from "react";
 
 import "./globals.css";
+import { PosthogPageTracker } from "@/components/posthog-page-tracker";
 import { cn } from "@/lib/utils";
 
 const geistSans = Geist({ subsets: ["latin"], variable: "--font-sans" });
@@ -55,6 +56,7 @@ const RootLayout = ({ children }: { children: ReactNode }) => (
   >
     <body className="flex min-h-full flex-col">
       <RootProvider search={{ options: { api: "/search" } }}>
+        <PosthogPageTracker />
         {children}
       </RootProvider>
     </body>

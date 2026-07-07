@@ -7,6 +7,7 @@ import {
   FileText,
   MessageCircle,
 } from "lucide-react";
+import posthog from "posthog-js";
 import type { ReactNode } from "react";
 import { useState } from "react";
 
@@ -144,6 +145,9 @@ export const PageActions = ({
       await navigator.clipboard.writeText(markdown);
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
+      posthog.capture("docs_markdown_copied", {
+        page_url: markdownAbsoluteUrl,
+      });
     } catch {
       // clipboard unavailable — ignore
     }
@@ -177,7 +181,16 @@ export const PageActions = ({
               </a>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
-              <a href={githubUrl} rel="noopener noreferrer" target="_blank">
+              <a
+                href={githubUrl}
+                onClick={() =>
+                  posthog.capture("docs_viewed_on_github", {
+                    page_url: markdownAbsoluteUrl,
+                  })
+                }
+                rel="noopener noreferrer"
+                target="_blank"
+              >
                 <GitHubIcon />
                 Open in GitHub
               </a>
@@ -189,6 +202,12 @@ export const PageActions = ({
               <DropdownMenuItem asChild key={provider.name}>
                 <a
                   href={provider.createUrl(prompt)}
+                  onClick={() =>
+                    posthog.capture("docs_opened_in_external_chat", {
+                      page_url: markdownAbsoluteUrl,
+                      provider: provider.name,
+                    })
+                  }
                   rel="noopener noreferrer"
                   target="_blank"
                 >

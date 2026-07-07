@@ -30,9 +30,11 @@ import {
   Square,
   Trash2,
 } from "lucide-react";
+import posthog from "posthog-js";
 import {
   createContext,
   use,
+  useCallback,
   useEffect,
   useEffectEvent,
   useMemo,
@@ -42,6 +44,7 @@ import {
 import type { ComponentProps, ReactNode, SyntheticEvent } from "react";
 
 import type { SearchTool } from "@/app/api/chat/route";
+import { POSTHOG_DISTINCT_ID_HEADER } from "@/lib/posthog-analytics";
 import { cn } from "@/lib/utils";
 
 import { Markdown } from "./markdown";
@@ -61,6 +64,8 @@ const Context = createContext<{
   open: boolean;
   setOpen: (open: boolean) => void;
   chat: UseChatHelpers<UIMessage>;
+  sendTrackedMessage: (message: { text: string }) => string;
+  retryTracked: () => void;
 } | null>(null);
 
 const useAISearchContext = () => {
@@ -273,7 +278,7 @@ const List = (props: Omit<ComponentProps<"div">, "dir">) => {
 };
 
 const EmptyState = () => {
-  const { sendMessage } = useChatContext();
+  const { sendTrackedMessage } = useAISearchContext();
 
   return (
     <div className="flex flex-1 flex-col justify-end gap-3 p-3">
@@ -282,7 +287,13 @@ const EmptyState = () => {
           <button
             className="text-start text-fd-foreground text-sm transition-colors hover:text-fd-primary"
             key={suggestion}
-            onClick={() => sendMessage({ text: suggestion })}
+            onClick={() => {
+              const traceId = sendTrackedMessage({ text: suggestion });
+              posthog.capture("ai_chat_suggestion_clicked", {
+                suggestion,
+                trace_id: traceId,
+              });
+            }}
             type="button"
           >
             {suggestion}
@@ -316,6 +327,9 @@ const Header = () => {
       await navigator.clipboard.writeText(transcript);
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
+      posthog.capture("ai_chat_conversation_copied", {
+        message_count: chat.messages.length,
+      });
     } catch {
       // clipboard unavailable — ignore
     }
@@ -366,7 +380,8 @@ const Header = () => {
 
 const StorageKeyInput = "__ai_search_input";
 const Composer = () => {
-  const { status, sendMessage, stop, messages, regenerate } = useChatContext();
+  const { sendTrackedMessage, retryTracked } = useAISearchContext();
+  const { status, stop, messages } = useChatContext();
   const [input, setInput] = useState(
     () => localStorage.getItem(StorageKeyInput) ?? ""
   );
@@ -378,7 +393,12 @@ const Composer = () => {
     if (message.length === 0 || isLoading) {
       return;
     }
-    void sendMessage({ text: message });
+    const traceId = sendTrackedMessage({ text: message });
+    posthog.capture("ai_chat_message_submitted", {
+      conversation_turn: messages.length + 1,
+      message_length: message.length,
+      trace_id: traceId,
+    });
     setInput("");
     localStorage.removeItem(StorageKeyInput);
   };
@@ -396,7 +416,7 @@ const Composer = () => {
               size: "sm",
             })
           )}
-          onClick={() => regenerate()}
+          onClick={() => retryTracked()}
           type="button"
         >
           <RefreshCw className="size-3.5" />
@@ -467,13 +487,66 @@ const Composer = () => {
 
 export const AISearch = ({ children }: { children: ReactNode }) => {
   const [open, setOpen] = useState(false);
+  const activeTraceId = useRef<string | null>(null);
+
   const chat = useChat({
     id: "search",
-    transport: new DefaultChatTransport({ api: "/api/chat" }),
+    onError: (error) => {
+      posthog.capture("ai_chat_error", {
+        error_message: error.message,
+        trace_id: activeTraceId.current,
+      });
+      activeTraceId.current = null;
+    },
+    onFinish: ({ finishReason, isAbort, isError, messages }) => {
+      const traceId = activeTraceId.current;
+      if (isAbort) {
+        posthog.capture("ai_chat_stopped", {
+          finish_reason: finishReason,
+          message_count: messages.length,
+          trace_id: traceId,
+        });
+      } else if (!isError) {
+        posthog.capture("ai_chat_completed", {
+          finish_reason: finishReason,
+          message_count: messages.length,
+          trace_id: traceId,
+        });
+      }
+      activeTraceId.current = null;
+    },
+    transport: new DefaultChatTransport({
+      api: "/api/chat",
+      headers: () => ({
+        [POSTHOG_DISTINCT_ID_HEADER]: posthog.get_distinct_id(),
+      }),
+    }),
   });
 
+  const sendTrackedMessage = useCallback(
+    (message: { text: string }) => {
+      const traceId = crypto.randomUUID();
+      activeTraceId.current = traceId;
+      void chat.sendMessage(message, { body: { trace_id: traceId } });
+      return traceId;
+    },
+    [chat]
+  );
+
+  const retryTracked = useCallback(() => {
+    const traceId = crypto.randomUUID();
+    activeTraceId.current = traceId;
+    posthog.capture("ai_chat_retried", { trace_id: traceId });
+    void chat.regenerate({ body: { trace_id: traceId } });
+  }, [chat]);
+
   return (
-    <Context value={useMemo(() => ({ chat, open, setOpen }), [chat, open])}>
+    <Context
+      value={useMemo(
+        () => ({ chat, open, retryTracked, sendTrackedMessage, setOpen }),
+        [chat, open, retryTracked, sendTrackedMessage]
+      )}
+    >
       {children}
     </Context>
   );
@@ -496,7 +569,12 @@ export const AISearchTrigger = ({
         className
       )}
       data-state={open ? "open" : "closed"}
-      onClick={() => setOpen(!open)}
+      onClick={() => {
+        if (!open) {
+          posthog.capture("ai_chat_opened");
+        }
+        setOpen(!open);
+      }}
       type="button"
       {...props}
     >

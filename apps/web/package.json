@@ -15,6 +15,7 @@
   "dependencies": {
     "@ai-sdk/react": "^3.0.220",
     "@openrouter/ai-sdk-provider": "^2.10.0",
+    "@posthog/ai": "^8.3.0",
     "@radix-ui/react-presence": "^1.1.6",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.0",
@@ -30,6 +31,8 @@
     "lucide-react": "^0.469.0",
     "motion": "^12.40.0",
     "next": "16.3.0-canary.68",
+    "posthog-js": "^1.257.0",
+    "posthog-node": "^5.38.5",
     "radix-ui": "^1.4.3",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

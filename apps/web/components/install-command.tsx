@@ -1,6 +1,7 @@
 "use client";
 
 import { Check, Copy } from "lucide-react";
+import posthog from "posthog-js";
 import { useState } from "react";
 
 import {
@@ -33,6 +34,10 @@ export const InstallCommand = ({ className }: { className?: string }) => {
       );
       setCopiedManager(manager);
       setTimeout(() => setCopiedManager(null), 1800);
+      posthog.capture("install_command_copied", {
+        package_manager: manager,
+        section: "cta",
+      });
     } catch {
       // clipboard unavailable — ignore
     }

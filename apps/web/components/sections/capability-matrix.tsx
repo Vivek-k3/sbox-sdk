@@ -1,6 +1,7 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import posthog from "posthog-js";
+import { Fragment, useRef, useState } from "react";
 
 import { CAPABILITY_GROUPS, nativeCount, PROVIDERS } from "@/lib/capabilities";
 import type { Level } from "@/lib/capabilities";
@@ -31,6 +32,26 @@ const Indicator = ({ level }: { level: Level }) => {
 
 export const CapabilityMatrix = () => {
   const [hover, setHover] = useState<Hover | null>(null);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTracked = useRef<string | null>(null);
+
+  const trackHover = (next: Hover) => {
+    const key = `${next.provider}:${next.cap}:${next.level}`;
+    if (lastTracked.current === key) {
+      return;
+    }
+    if (hoverTimer.current) {
+      clearTimeout(hoverTimer.current);
+    }
+    hoverTimer.current = setTimeout(() => {
+      lastTracked.current = key;
+      posthog.capture("capability_matrix_hovered", {
+        capability: next.cap,
+        level: next.level,
+        provider: next.provider,
+      });
+    }, 400);
+  };
 
   return (
     <div className="not-prose my-6">
@@ -126,14 +147,16 @@ export const CapabilityMatrix = () => {
                             hover?.col === ci && "bg-accent/60"
                           )}
                           key={p.id}
-                          onMouseEnter={() =>
-                            setHover({
+                          onMouseEnter={() => {
+                            const next = {
                               cap: cap.label,
                               col: ci,
                               level,
                               provider: p.name,
-                            })
-                          }
+                            };
+                            setHover(next);
+                            trackHover(next);
+                          }}
                           onMouseLeave={() => setHover(null)}
                           title={`${p.name} · ${cap.label} — ${level}`}
                         >

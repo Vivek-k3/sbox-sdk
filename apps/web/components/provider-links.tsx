@@ -1,3 +1,7 @@
+"use client";
+
+import posthog from "posthog-js";
+
 import { PROVIDER_LINKS } from "@/lib/provider-links";
 
 /**
@@ -17,6 +21,13 @@ export const ProviderLinks = ({ provider }: { provider: string }) => {
           className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/30 px-3 py-1.5 font-mono text-foreground text-xs no-underline transition-colors hover:bg-accent/60"
           href={link.href}
           key={link.href}
+          onClick={() =>
+            posthog.capture("provider_outbound_clicked", {
+              destination: link.label.toLowerCase(),
+              href: link.href,
+              provider,
+            })
+          }
           rel="noreferrer"
           target="_blank"
         >
