@@ -16,6 +16,12 @@ import type {
 export interface ExecHandleOptions {
   onStdout?: (chunk: string) => void;
   onStderr?: (chunk: string) => void;
+  onComplete?: (outcome: {
+    durationMs: number;
+    error?: unknown;
+    exitCode?: number;
+    ok: boolean;
+  }) => void;
   /** Parse `__sbox_rc=N` out of stdout to synthesize the exit code. */
   parseExitMarker?: boolean;
   /** Normalize errors thrown while iterating the source. */
@@ -31,6 +37,7 @@ class ExecHandleImpl implements ExecHandle {
   readonly #events: OutputEvent[] = [];
   #wakers: (() => void)[] = [];
   #startedPump = false;
+  #startedAt = 0;
   #done = false;
   #error: unknown = null;
   #exitCode = 0;
@@ -67,6 +74,7 @@ class ExecHandleImpl implements ExecHandle {
       return;
     }
     this.#startedPump = true;
+    this.#startedAt = Date.now();
     void this.#pump();
   }
 
@@ -122,6 +130,7 @@ class ExecHandleImpl implements ExecHandle {
       this.#error = this.#opts.mapError
         ? this.#opts.mapError(err)
         : SandboxError.wrap(err);
+      this.#complete({ error: this.#error, ok: false });
       this.#rejectResult(this.#error);
       this.#notify();
       return;
@@ -141,8 +150,24 @@ class ExecHandleImpl implements ExecHandle {
       stdout,
       ...(this.#synthesized ? { exitCodeSynthesized: true } : {}),
     };
+    this.#complete({ exitCode: result.exitCode, ok: result.exitCode === 0 });
     this.#resolveResult(result);
     this.#notify();
+  }
+
+  #complete(outcome: {
+    error?: unknown;
+    exitCode?: number;
+    ok: boolean;
+  }): void {
+    try {
+      this.#opts.onComplete?.({
+        ...outcome,
+        durationMs: Math.max(0, Date.now() - this.#startedAt),
+      });
+    } catch {
+      // Observers must not affect command behavior.
+    }
   }
 
   // ---- Promise<ExecResult> ----

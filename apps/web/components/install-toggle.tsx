@@ -1,6 +1,7 @@
 "use client";
 
 import { Check, Copy } from "lucide-react";
+import posthog from "posthog-js";
 import { useState } from "react";
 
 import {
@@ -48,6 +49,10 @@ export const InstallToggle = ({ className }: { className?: string }) => {
       );
       setCopiedManager(manager);
       setTimeout(() => setCopiedManager(null), 1800);
+      posthog.capture("install_command_copied", {
+        package_manager: manager,
+        section: "hero",
+      });
     } catch {
       // clipboard unavailable — ignore
     }
@@ -58,6 +63,7 @@ export const InstallToggle = ({ className }: { className?: string }) => {
       await navigator.clipboard.writeText(AGENT_COMMAND);
       setCopiedAgent(true);
       setTimeout(() => setCopiedAgent(false), 1800);
+      posthog.capture("agent_install_command_copied", { section: "hero" });
     } catch {
       // clipboard unavailable — ignore
     }
@@ -71,7 +77,13 @@ export const InstallToggle = ({ className }: { className?: string }) => {
           ? "font-medium text-foreground"
           : "text-muted-foreground hover:text-foreground"
       )}
-      onClick={() => setMode(value)}
+      onClick={() => {
+        if (mode === value) {
+          return;
+        }
+        setMode(value);
+        posthog.capture("install_mode_toggled", { mode: value });
+      }}
       type="button"
     >
       {label}

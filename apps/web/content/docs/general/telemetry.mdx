@@ -1,0 +1,61 @@
+---
+title: Anonymous usage data
+description: sbox SDK collects limited anonymous usage data to understand adoption and improve the SDK.
+---
+
+## What we collect
+
+sbox SDK collects limited anonymous usage data by default. We use it to understand adoption, see which parts of the SDK are used, and prioritize improvements.
+
+The data is intentionally coarse:
+
+- SDK version
+- runtime and platform
+- selected provider
+- operation type, such as creating a sandbox or running a command
+- success or failure
+- duration bucket
+- error category
+- command exit code
+
+Usage data may be sent from any environment where the SDK runs, including local development, CI, tests, previews, and production.
+
+This is separate from any analytics you use in your own app. sbox SDK does not read, modify, identify, or share state with your app's analytics client.
+
+## What we never collect
+
+sbox SDK does not collect:
+
+- API keys or credentials
+- prompts or model inputs
+- command strings
+- file paths or file contents
+- environment variables
+- stdout or stderr
+- sandbox ids
+- project names
+- metadata values
+- provider-specific request payloads
+
+## How to opt out
+
+Set any of these environment variables:
+
+```bash
+SBOX_TELEMETRY_DISABLED=1
+SBOX_DISABLE_TELEMETRY=1
+SBOX_TELEMETRY=0
+DO_NOT_TRACK=1
+```
+
+Or disable usage data for one client:
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+
+const client = createSandboxClient({
+  telemetry: false,
+});
+```
+
+Usage data is not automatically disabled in CI, tests, local development, previews, or production. Use one of the opt-out controls above when you do not want it sent.

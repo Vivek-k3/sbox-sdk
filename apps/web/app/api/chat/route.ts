@@ -1,3 +1,4 @@
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 /**
  * The "Ask AI" chat endpoint that powers the in-docs assistant.
  *
@@ -12,13 +13,17 @@
  * free, tool-capable model and any OpenRouter model id can be swapped in with
  * the `OPENROUTER_MODEL` env var — the application code never changes.
  */
-import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+import { withTracing } from "@posthog/ai";
 import { convertToModelMessages, stepCountIs, streamText, tool } from "ai";
 import type { UIMessage } from "ai";
 import { Document } from "flexsearch";
 import type { DocumentData } from "flexsearch";
+import { after } from "next/server";
+import type { PostHog } from "posthog-node";
 import { z } from "zod";
 
+import { getPostHogDistinctIdFromRequest } from "@/lib/posthog-analytics";
+import { getPostHogClient } from "@/lib/posthog-server";
 import { getClientId, rateLimit } from "@/lib/rate-limit";
 import { source } from "@/lib/source";
 
@@ -81,35 +86,61 @@ const createSearchServer = async () => {
 // Build the search index once per server instance, lazily awaited per request.
 const searchServer = createSearchServer();
 
-const searchTool = tool({
-  description:
-    "Search the sbox-sdk documentation and return the most relevant pages as JSON. Always search before answering questions about the SDK.",
-  execute: async ({ query, limit }) => {
-    const index = await searchServer;
-    const results = await index.searchAsync(query, {
-      enrich: true,
-      limit,
-      merge: true,
-    });
+interface SearchToolContext {
+  distinctId: string;
+  posthog: PostHog;
+  traceId: string;
+}
 
-    return results
-      .map((item) => item.doc)
-      .filter((doc): doc is DocsDocument => doc !== null && doc !== undefined)
-      .map((doc) => ({
-        content: doc.content.slice(0, MAX_CONTENT_CHARS),
-        description: doc.description,
-        title: doc.title,
-        url: doc.url,
-      }));
-  },
-  inputSchema: z.object({
-    limit: z.number().int().min(1).max(20).default(8),
-    query: z.string().describe("A natural-language search query."),
-  }),
-});
+const createSearchTool = ({
+  distinctId,
+  posthog,
+  traceId,
+}: SearchToolContext) =>
+  tool({
+    description:
+      "Search the sbox-sdk documentation and return the most relevant pages as JSON. Always search before answering questions about the SDK.",
+    execute: async ({ query, limit }) => {
+      const startedAt = Date.now();
+      const index = await searchServer;
+      const results = await index.searchAsync(query, {
+        enrich: true,
+        limit,
+        merge: true,
+      });
+
+      const docs = results
+        .map((item) => item.doc)
+        .filter((doc): doc is DocsDocument => doc !== null && doc !== undefined)
+        .map((doc) => ({
+          content: doc.content.slice(0, MAX_CONTENT_CHARS),
+          description: doc.description,
+          title: doc.title,
+          url: doc.url,
+        }));
+
+      posthog.capture({
+        distinctId,
+        event: "ai_chat_search_executed",
+        properties: {
+          duration_ms: Date.now() - startedAt,
+          query_length: query.length,
+          result_count: docs.length,
+          top_urls: docs.slice(0, 3).map((doc) => doc.url),
+          trace_id: traceId,
+        },
+      });
+
+      return docs;
+    },
+    inputSchema: z.object({
+      limit: z.number().int().min(1).max(20).default(8),
+      query: z.string().describe("A natural-language search query."),
+    }),
+  });
 
 /** Exported so the chat UI can type each `search` tool invocation. */
-export type SearchTool = typeof searchTool;
+export type SearchTool = ReturnType<typeof createSearchTool>;
 
 /** System prompt — tweak to change the assistant's voice and grounding rules. */
 const systemPrompt = [
@@ -121,12 +152,22 @@ const systemPrompt = [
 ].join("\n");
 
 export const POST = async (req: Request) => {
+  const clientId = getClientId(req);
+  const posthog = getPostHogClient();
+
   // Fair-use throttle first, so abuse never reaches the (paid) model call.
-  const { success, limit, remaining, reset } = await rateLimit(
-    getClientId(req)
-  );
+  const { success, limit, remaining, reset } = await rateLimit(clientId);
   if (!success) {
     const retryAfter = Math.max(1, Math.ceil((reset - Date.now()) / 1000));
+    const distinctId = getPostHogDistinctIdFromRequest(req, clientId);
+    posthog.capture({
+      distinctId,
+      event: "ai_chat_rate_limit_hit",
+      properties: { rate_limit: limit, retry_after_seconds: retryAfter },
+    });
+    after(async () => {
+      await posthog.flush();
+    });
     return new Response(
       "You've reached the Ask AI usage limit. Please wait a moment and try again.",
       {
@@ -151,14 +192,44 @@ export const POST = async (req: Request) => {
   // Build the provider per request so the API key is read at request time
   // rather than captured at module load (when env may not yet be populated).
   const openrouter = createOpenRouter({ apiKey });
-  const { messages }: { messages: UIMessage[] } = await req.json();
+  const {
+    messages,
+    trace_id: clientTraceId,
+  }: { messages: UIMessage[]; trace_id?: string } = await req.json();
+  const modelId = process.env.OPENROUTER_MODEL ?? DEFAULT_MODEL;
+  const traceId = clientTraceId ?? crypto.randomUUID();
+  const distinctId = getPostHogDistinctIdFromRequest(req, clientId);
+
+  posthog.capture({
+    distinctId,
+    event: "ai_chat_query_received",
+    properties: {
+      message_count: messages.length,
+      model: modelId,
+      trace_id: traceId,
+    },
+  });
 
   const result = streamText({
     messages: await convertToModelMessages(messages),
-    model: openrouter.chat(process.env.OPENROUTER_MODEL ?? DEFAULT_MODEL),
+    model: withTracing(openrouter.chat(modelId), posthog, {
+      posthogCaptureImmediate: true,
+      posthogDistinctId: distinctId,
+      posthogModelOverride: modelId,
+      posthogProperties: {
+        $ai_span_name: "docs_ask_ai",
+        message_count: messages.length,
+      },
+      posthogProviderOverride: "openrouter",
+      posthogTraceId: traceId,
+    }),
     stopWhen: stepCountIs(5),
     system: systemPrompt,
-    tools: { search: searchTool },
+    tools: { search: createSearchTool({ distinctId, posthog, traceId }) },
+  });
+
+  after(async () => {
+    await posthog.flush();
   });
 
   return result.toUIMessageStreamResponse();

@@ -12,6 +12,7 @@
     "errors",
     "escape-hatch",
     "retries",
+    "telemetry",
     "---For Agents---",
     "skills",
     "llms-txt"

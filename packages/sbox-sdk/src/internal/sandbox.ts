@@ -20,6 +20,8 @@ import {
   parseStatOutput,
   shellQuote,
 } from "./shell.js";
+import { durationBucket, errorCode } from "./telemetry.js";
+import type { TelemetryEventName, TelemetryReporter } from "./telemetry.js";
 import type {
   CallContext,
   CodeAPI,
@@ -46,6 +48,7 @@ export interface BuildSandboxBase {
   defaultMetadata?: Record<string, string>;
   /** Plugins to graft onto every sandbox (applied here so forks inherit them). */
   plugins?: readonly SandboxPlugin[];
+  telemetry?: TelemetryReporter;
 }
 
 export function buildSandbox<Caps extends CapabilityMap, Raw>(
@@ -66,6 +69,20 @@ export function buildSandbox<Caps extends CapabilityMap, Raw>(
 
   const wrapErr = (e: unknown): SandboxError =>
     provider.mapError?.(e) ?? SandboxError.wrap(e, name);
+
+  const trackOutcome = (
+    event: TelemetryEventName,
+    startedAt: number,
+    ok: boolean,
+    extra: Record<string, string | number | boolean | null | undefined> = {}
+  ): void => {
+    base.telemetry?.track(event, {
+      duration_bucket: durationBucket(Date.now() - startedAt),
+      ok,
+      provider: name,
+      ...extra,
+    });
+  };
 
   const guard = async <T>(fn: () => T | Promise<T>): Promise<T> => {
     try {
@@ -115,6 +132,7 @@ export function buildSandbox<Caps extends CapabilityMap, Raw>(
     },
     run(cmd, opts = {}) {
       const built = buildExecCommand(joinCmd(cmd), opts, provider.flags);
+      const createdAt = Date.now();
       const source = handle.exec(
         built.command,
         built.execOptions,
@@ -122,6 +140,21 @@ export function buildSandbox<Caps extends CapabilityMap, Raw>(
       );
       return createExecHandle(source, {
         mapError: wrapErr,
+        onComplete: (outcome) => {
+          base.telemetry?.track("command_run", {
+            duration_bucket: durationBucket(outcome.durationMs),
+            error_code: outcome.error ? errorCode(outcome.error) : undefined,
+            exit_code:
+              typeof outcome.exitCode === "number"
+                ? outcome.exitCode
+                : undefined,
+            ok: outcome.ok,
+            provider: name,
+            start_delay_bucket: durationBucket(
+              Math.max(0, Date.now() - createdAt - outcome.durationMs)
+            ),
+          });
+        },
         onStderr: opts.onStderr,
         onStdout: opts.onStdout,
         parseExitMarker: built.parseExitMarker,
@@ -375,7 +408,18 @@ export function buildSandbox<Caps extends CapabilityMap, Raw>(
     capabilities: caps,
     code: (isCapable(caps, "codeInterpreter") ? code : undefined) as S["code"],
     commands,
-    destroy: () => guard(() => handle.destroy(mkCtx())),
+    destroy: async () => {
+      const startedAt = Date.now();
+      try {
+        await guard(() => handle.destroy(mkCtx()));
+        trackOutcome("sandbox_destroy", startedAt, true);
+      } catch (error) {
+        trackOutcome("sandbox_destroy", startedAt, false, {
+          error_code: errorCode(error),
+        });
+        throw error;
+      }
+    },
     files,
     getInfo: () => guard(() => handle.getInfo(mkCtx())),
     id: handle.id,
