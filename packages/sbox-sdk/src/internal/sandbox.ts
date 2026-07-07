@@ -21,7 +21,7 @@ import {
   shellQuote,
 } from "./shell.js";
 import { durationBucket, errorCode } from "./telemetry.js";
-import type { TelemetryReporter } from "./telemetry.js";
+import type { TelemetryEventName, TelemetryReporter } from "./telemetry.js";
 import type {
   CallContext,
   CodeAPI,
@@ -71,7 +71,7 @@ export function buildSandbox<Caps extends CapabilityMap, Raw>(
     provider.mapError?.(e) ?? SandboxError.wrap(e, name);
 
   const trackOutcome = (
-    event: "sandbox_destroy",
+    event: TelemetryEventName,
     startedAt: number,
     ok: boolean,
     extra: Record<string, string | number | boolean | null | undefined> = {}

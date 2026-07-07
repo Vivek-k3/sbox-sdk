@@ -238,7 +238,7 @@ export function createSandboxClient(options?: ClientOptions): SandboxClient {
         });
         throw error;
       } finally {
-        await telemetry.flush();
+        await telemetry.close();
       }
     },
 
@@ -248,25 +248,26 @@ export function createSandboxClient(options?: ClientOptions): SandboxClient {
       }
       const startedAt = Date.now();
       let count = 0;
+      let failure: string | undefined;
       try {
         for await (const info of provider.list(filter, mkCtx(1))) {
           count++;
           yield info;
         }
+      } catch (error) {
+        failure = errorCode(error);
+        throw error;
+      } finally {
+        // Emit once on any exit — normal completion, a thrown error, or an
+        // early consumer `break`/`return` (which unwinds through here). Early
+        // termination is not a failure, so `ok` is false only when we caught.
         telemetry.track("sandbox_list", {
           count,
           duration_bucket: durationBucket(Date.now() - startedAt),
-          ok: true,
+          ok: failure === undefined,
           provider: provider.name,
+          ...(failure === undefined ? {} : { error_code: failure }),
         });
-      } catch (error) {
-        telemetry.track("sandbox_list", {
-          duration_bucket: durationBucket(Date.now() - startedAt),
-          error_code: errorCode(error),
-          ok: false,
-          provider: provider.name,
-        });
-        throw error;
       }
     },
 

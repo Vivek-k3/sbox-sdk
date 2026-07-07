@@ -78,6 +78,9 @@ export const InstallToggle = ({ className }: { className?: string }) => {
           : "text-muted-foreground hover:text-foreground"
       )}
       onClick={() => {
+        if (mode === value) {
+          return;
+        }
         setMode(value);
         posthog.capture("install_mode_toggled", { mode: value });
       }}

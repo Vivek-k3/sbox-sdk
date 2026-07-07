@@ -165,6 +165,9 @@ export const POST = async (req: Request) => {
       event: "ai_chat_rate_limit_hit",
       properties: { rate_limit: limit, retry_after_seconds: retryAfter },
     });
+    after(async () => {
+      await posthog.flush();
+    });
     return new Response(
       "You've reached the Ask AI usage limit. Please wait a moment and try again.",
       {

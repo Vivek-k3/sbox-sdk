@@ -153,6 +153,32 @@ describe("telemetry", () => {
     expect(bodies).toEqual([]);
   });
 
+  it("still emits sandbox_list when the consumer breaks early", async () => {
+    const bodies: unknown[] = [];
+    const client = createSandboxClient({
+      fetch: fakeFetch(bodies),
+      telemetry: {
+        distinctId: "anon-test",
+        flushAt: 1,
+        projectKey: "phc_test",
+      },
+    });
+
+    await client.create();
+    await client.create();
+    for await (const _info of client.list()) {
+      break; // early termination must not drop the list telemetry
+    }
+    await client.dispose();
+
+    const listEvent = eventsFrom(bodies).find(
+      (event) => event.event === "sbox_sdk_sandbox_list"
+    );
+    expect(listEvent).toBeDefined();
+    expect(listEvent?.properties).toMatchObject({ ok: true });
+    expect(listEvent?.properties.count).toBe(1);
+  });
+
   it("captures failure outcomes without leaking provider error details", async () => {
     const bodies: unknown[] = [];
     const client = createSandboxClient({
