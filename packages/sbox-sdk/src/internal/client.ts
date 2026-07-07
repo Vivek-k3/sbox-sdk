@@ -14,6 +14,11 @@ import {
 import type { ProviderAttempt } from "./errors.js";
 import type { MergePlugins, SandboxPlugin } from "./plugin.js";
 import { buildSandbox } from "./sandbox.js";
+import {
+  createTelemetryReporter,
+  durationBucket,
+  errorCode,
+} from "./telemetry.js";
 import type {
   CallContext,
   ClientOptions,
@@ -57,6 +62,10 @@ export function createSandboxClient(options?: ClientOptions): SandboxClient {
   const fallback = options?.fallback ?? [];
   const hooks = options?.hooks;
   const plugins = options?.plugins ?? [];
+  const telemetry = createTelemetryReporter({
+    fetch: fetchImpl,
+    telemetry: options?.telemetry,
+  });
   const aiProviders = plugins.filter((p) => p.kind === "ai-provider");
   if (aiProviders.length > 1) {
     throw new SandboxError(
@@ -74,7 +83,10 @@ export function createSandboxClient(options?: ClientOptions): SandboxClient {
     emulate: options?.emulate,
     fetch: fetchImpl,
     plugins,
+    telemetry,
   };
+
+  telemetry.track("client_initialized", { provider: provider.name });
 
   const mkCtx = (
     attempt: number,
@@ -122,14 +134,30 @@ export function createSandboxClient(options?: ClientOptions): SandboxClient {
     },
 
     async connect(id: string): Promise<Sandbox> {
-      const handle = await withRetry((attempt) =>
-        Promise.resolve(provider.connect(id, mkCtx(attempt)))
-      );
-      const sandbox = buildSandbox(provider, handle, base);
-      for (const pl of plugins) {
-        await pl.onCreate?.(sandbox as Sandbox, {});
+      const startedAt = Date.now();
+      try {
+        const handle = await withRetry((attempt) =>
+          Promise.resolve(provider.connect(id, mkCtx(attempt)))
+        );
+        const sandbox = buildSandbox(provider, handle, base);
+        for (const pl of plugins) {
+          await pl.onCreate?.(sandbox as Sandbox, {});
+        }
+        telemetry.track("sandbox_connect", {
+          duration_bucket: durationBucket(Date.now() - startedAt),
+          ok: true,
+          provider: provider.name,
+        });
+        return sandbox as unknown as Sandbox;
+      } catch (error) {
+        telemetry.track("sandbox_connect", {
+          duration_bucket: durationBucket(Date.now() - startedAt),
+          error_code: errorCode(error),
+          ok: false,
+          provider: provider.name,
+        });
+        throw error;
       }
-      return sandbox as unknown as Sandbox;
     },
 
     async create(
@@ -137,6 +165,7 @@ export function createSandboxClient(options?: ClientOptions): SandboxClient {
       createOptions?: SandboxCreateOptions
     ): Promise<Sandbox> {
       const idem = spec.idempotencyKey ?? globalThis.crypto.randomUUID();
+      const startedAt = Date.now();
       await hooks?.beforeCreate?.(spec);
       // Only fall back across providers when the caller supplied an idempotency
       // key — otherwise a retried create could orphan a second VM.
@@ -163,26 +192,82 @@ export function createSandboxClient(options?: ClientOptions): SandboxClient {
           for (const pl of plugins) {
             await pl.onCreate?.(sandbox as Sandbox, { createOptions });
           }
+          telemetry.track("sandbox_create", {
+            duration_bucket: durationBucket(Date.now() - startedAt),
+            ok: true,
+            provider: p.name,
+          });
           return sandbox as unknown as Sandbox;
         } catch (error) {
           attempts.push({ error, provider: p.name });
         }
       }
       if (attempts.length === 1) {
+        telemetry.track("sandbox_create", {
+          duration_bucket: durationBucket(Date.now() - startedAt),
+          error_code: errorCode(attempts[0]!.error),
+          ok: false,
+          provider: attempts[0]!.provider,
+        });
         throw attempts[0]!.error;
       }
+      telemetry.track("sandbox_create", {
+        duration_bucket: durationBucket(Date.now() - startedAt),
+        error_code: "AllProvidersFailed",
+        ok: false,
+        provider_count: attempts.length,
+      });
       throw new AllProvidersFailedError(attempts);
     },
 
     async dispose() {
-      await provider.dispose?.();
+      const startedAt = Date.now();
+      try {
+        await provider.dispose?.();
+        telemetry.track("client_dispose", {
+          duration_bucket: durationBucket(Date.now() - startedAt),
+          ok: true,
+          provider: provider.name,
+        });
+      } catch (error) {
+        telemetry.track("client_dispose", {
+          duration_bucket: durationBucket(Date.now() - startedAt),
+          error_code: errorCode(error),
+          ok: false,
+          provider: provider.name,
+        });
+        throw error;
+      } finally {
+        await telemetry.flush();
+      }
     },
 
     async *list(filter?: ListFilter) {
       if (!provider.list) {
         throw new NotSupportedError(provider.name, "list");
       }
-      yield* provider.list(filter, mkCtx(1));
+      const startedAt = Date.now();
+      let count = 0;
+      try {
+        for await (const info of provider.list(filter, mkCtx(1))) {
+          count++;
+          yield info;
+        }
+        telemetry.track("sandbox_list", {
+          count,
+          duration_bucket: durationBucket(Date.now() - startedAt),
+          ok: true,
+          provider: provider.name,
+        });
+      } catch (error) {
+        telemetry.track("sandbox_list", {
+          duration_bucket: durationBucket(Date.now() - startedAt),
+          error_code: errorCode(error),
+          ok: false,
+          provider: provider.name,
+        });
+        throw error;
+      }
     },
 
     get provider() {

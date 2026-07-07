@@ -18,18 +18,21 @@ const client = createSandboxClient({
 
 ### Options
 
-| Option            | Type                      | Default            | Purpose                                                  |
-| ----------------- | ------------------------- | ------------------ | -------------------------------------------------------- |
-| `provider`        | `SandboxProvider`         | in-memory          | The adapter to route to                                  |
-| `fallback`        | `SandboxProvider[]`       | `[]`               | Backup providers — engages only with an `idempotencyKey` |
-| `retry`           | `RetryPolicy`             | `{ retries: 2 }`   | `retries`, `delayMs`, `shouldRetry`                      |
-| `hooks`           | `Hooks`                   | —                  | `beforeCreate`, `afterCreate`, `onError`                 |
-| `fetch`           | `typeof fetch`            | `globalThis.fetch` | Injectable transport (test seam)                         |
-| `emulate`         | `(keyof CapabilityMap)[]` | —                  | Opt-in lossy emulations                                  |
-| `defaultMetadata` | `Record<string, string>`  | —                  | Merged into every `create`                               |
-| `plugins`         | `SandboxPlugin[]`         | `[]`               | Augment every sandbox (e.g. the `ai(...)` plugin)        |
+| Option            | Type                          | Default            | Purpose                                                  |
+| ----------------- | ----------------------------- | ------------------ | -------------------------------------------------------- |
+| `provider`        | `SandboxProvider`             | in-memory          | The adapter to route to                                  |
+| `fallback`        | `SandboxProvider[]`           | `[]`               | Backup providers — engages only with an `idempotencyKey` |
+| `retry`           | `RetryPolicy`                 | `{ retries: 2 }`   | `retries`, `delayMs`, `shouldRetry`                      |
+| `hooks`           | `Hooks`                       | —                  | `beforeCreate`, `afterCreate`, `onError`                 |
+| `fetch`           | `typeof fetch`                | `globalThis.fetch` | Injectable transport (test seam)                         |
+| `emulate`         | `(keyof CapabilityMap)[]`     | —                  | Opt-in lossy emulations                                  |
+| `defaultMetadata` | `Record<string, string>`      | —                  | Merged into every `create`                               |
+| `plugins`         | `SandboxPlugin[]`             | `[]`               | Augment every sandbox (e.g. the `ai(...)` plugin)        |
+| `telemetry`       | `boolean \| TelemetryOptions` | enabled            | Anonymous usage data. Pass `false` to opt out            |
 
 See [Retries & fallback](/retries) for `retry`, `fallback`, and `hooks` in depth.
+
+See [Anonymous usage data](/telemetry) for what is collected and how to opt out.
 
 ## `SandboxClient`
 

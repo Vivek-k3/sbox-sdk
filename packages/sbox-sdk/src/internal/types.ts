@@ -94,6 +94,24 @@ export interface ExecOptions {
   onStderr?: (chunk: string) => void;
 }
 
+export interface TelemetryOptions {
+  /**
+   * Anonymous telemetry is enabled by default. Set `false` to disable it for
+   * this client regardless of environment variables.
+   */
+  enabled?: boolean;
+  /** Override the default sbox PostHog project token for this client. */
+  projectKey?: string;
+  /** PostHog ingestion host. Defaults to https://us.i.posthog.com. */
+  host?: string;
+  /** Override the anonymous per-process distinct id. */
+  distinctId?: string;
+  /** Flush after this many queued events. Mostly useful for tests. */
+  flushAt?: number;
+  /** Delay before flushing queued events. Mostly useful for tests. */
+  flushIntervalMs?: number;
+}
+
 export interface ExecResult {
   readonly stdout: string;
   readonly stderr: string;
@@ -381,6 +399,8 @@ export interface ClientOptions<
   defaultMetadata?: Record<string, string>;
   /** Plugins applied to every sandbox this client builds (incl. forks). */
   plugins?: readonly SandboxPlugin[];
+  /** Anonymous product telemetry. Enabled by default; pass `false` to opt out. */
+  telemetry?: boolean | TelemetryOptions;
 }
 
 // ---------------------------------------------------------------------------
