@@ -13,7 +13,7 @@ jobs:
 
     strategy:
       matrix:
-        runtime: [node-20, node-22, node-24, bun]
+        runtime: [node-20, node-22, node-24]
 
     steps:
       - name: Checkout
@@ -42,16 +42,6 @@ jobs:
         with:
           node-version: 24.x
           cache: pnpm
-
-      - name: Use Node.js 24.x
-        if: matrix.runtime == 'bun'
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24.x
-          cache: pnpm
-
-      - uses: oven-sh/setup-bun@v2
-        name: Install Bun
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -65,7 +55,7 @@ jobs:
 
     strategy:
       matrix:
-        runtime: [node-20, node-22, node-24, bun]
+        runtime: [node-20, node-22, node-24]
 
     steps:
       - name: Checkout
@@ -94,16 +84,6 @@ jobs:
         with:
           node-version: 24.x
           cache: pnpm
-
-      - name: Use Node.js 24.x
-        if: matrix.runtime == 'bun'
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24.x
-          cache: pnpm
-
-      - uses: oven-sh/setup-bun@v2
-        name: Install Bun
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -126,9 +106,6 @@ jobs:
         with:
           node-version: 22.x
           cache: pnpm
-
-      - uses: oven-sh/setup-bun@v2
-        name: Install Bun
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -155,9 +132,6 @@ jobs:
           node-version: 22.x
           cache: pnpm
 
-      - uses: oven-sh/setup-bun@v2
-        name: Install Bun
-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -179,9 +153,6 @@ jobs:
         with:
           node-version: 22.x
           cache: pnpm
-
-      - uses: oven-sh/setup-bun@v2
-        name: Install Bun
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
