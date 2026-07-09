@@ -5,9 +5,13 @@
  * input cannot break out of the intended command.
  */
 import type { CapabilityFlags } from "./capabilities.js";
+import { SandboxError } from "./errors.js";
 import type { DirEntry, ExecOptions } from "./types.js";
 
 export const EXIT_MARKER = "__sbox_rc";
+
+/** POSIX-ish env var name: letter/underscore, then letters/digits/underscores. */
+const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** POSIX-safe single-quote escaping: wrap in '...', and encode embedded quotes. */
 export function shellQuote(value: string): string {
@@ -25,6 +29,38 @@ export interface BuiltExec {
   execOptions: ExecOptions;
   /** Whether the core should parse an exit-code marker out of stdout. */
   parseExitMarker: boolean;
+}
+
+/**
+ * Unconditionally bake cwd/env into a compound shell string — no `sh -c` wrapper
+ * and no exit marker. `buildExecCommand` uses this for providers that can't take
+ * per-command cwd/env; the tail-streaming path uses it for every provider, so the
+ * detached inner command carries its own environment.
+ */
+export function bakeCwdEnv(
+  rawCmd: string,
+  cwd: string | undefined,
+  env: Record<string, string> | undefined
+): string {
+  let inner = rawCmd;
+  if (env && Object.keys(env).length > 0) {
+    const exports = Object.entries(env)
+      .map(([k, v]) => {
+        if (!ENV_KEY_RE.test(k)) {
+          throw new SandboxError(
+            "Validation",
+            `invalid environment variable name: ${JSON.stringify(k)}`
+          );
+        }
+        return `export ${k}=${shellQuote(v)};`;
+      })
+      .join(" ");
+    inner = `${exports} ${inner}`;
+  }
+  if (cwd) {
+    inner = `cd ${shellQuote(cwd)} && ${inner}`;
+  }
+  return inner;
 }
 
 /**
@@ -52,15 +88,7 @@ export function buildExecCommand(
     inner = `${inner}; echo ${EXIT_MARKER}=$?`;
   }
   if (emulateCwdEnv) {
-    if (hasEnv) {
-      const exports = Object.entries(opts.env as Record<string, string>)
-        .map(([k, v]) => `export ${k}=${shellQuote(v)};`)
-        .join(" ");
-      inner = `${exports} ${inner}`;
-    }
-    if (hasCwd) {
-      inner = `cd ${shellQuote(opts.cwd as string)} && ${inner}`;
-    }
+    inner = bakeCwdEnv(inner, opts.cwd, opts.env);
   }
 
   // Strip the now-baked cwd/env from the options handed to the adapter.

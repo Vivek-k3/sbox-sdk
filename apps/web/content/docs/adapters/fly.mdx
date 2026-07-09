@@ -56,14 +56,14 @@ The Fly app must exist; each sandbox is a **Machine** inside it. [`template`](/t
 
 ## Capabilities
 
-| Capability          |    Level    | Notes                           |
-| ------------------- | :---------: | ------------------------------- |
-| `list` / `region`   |   native    |                                 |
-| `stop` / `pause`    |   native    | `pause` = suspend (memory kept) |
-| `streaming`         |  emulated   | `/exec` is buffered             |
-| `filesUpload`       |   native    | via `exec` + base64             |
-| `exposePort`        |   native    | preview at `<app>.fly.dev`      |
-| `codeInterpreter`   | unsupported |                                 |
-| `snapshot` / `fork` | unsupported |                                 |
+| Capability          |    Level    | Notes                                        |
+| ------------------- | :---------: | -------------------------------------------- |
+| `list` / `region`   |   native    |                                              |
+| `stop` / `pause`    |   native    | `pause` = suspend (memory kept)              |
+| `streaming`         |  emulated   | `/exec` buffered; core tails for live output |
+| `filesUpload`       |   native    | via `exec` + base64                          |
+| `exposePort`        |   native    | preview at `<app>.fly.dev`                   |
+| `codeInterpreter`   | unsupported |                                              |
+| `snapshot` / `fork` | unsupported |                                              |
 
 `perCommandEnvCwd` is `false` (core wraps); `preservesMemoryOnPause` is `true`; `preservesDiskOnStop` is `false`; `previewModel` is `subdomain`.

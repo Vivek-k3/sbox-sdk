@@ -14,6 +14,7 @@ import {
 import type { ProviderAttempt } from "./errors.js";
 import type { MergePlugins, SandboxPlugin } from "./plugin.js";
 import { buildSandbox } from "./sandbox.js";
+import { resolveStreaming } from "./tail-exec.js";
 import {
   createTelemetryReporter,
   durationBucket,
@@ -83,6 +84,7 @@ export function createSandboxClient(options?: ClientOptions): SandboxClient {
     emulate: options?.emulate,
     fetch: fetchImpl,
     plugins,
+    streaming: resolveStreaming(options?.streaming),
     telemetry,
   };
 

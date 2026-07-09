@@ -27,6 +27,9 @@ export interface ConformanceOptions {
   skip?: string[];
 }
 
+export const CHECK_STREAM_INCREMENTAL = "exec: streaming is incremental";
+export const CHECK_STDERR_SEPARATE = "exec: stdout and stderr stay separate";
+
 function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) {
     throw new Error(msg);
@@ -113,6 +116,55 @@ export async function runConformance(
         `streamed stdout (got ${JSON.stringify(out)})`
       );
       assert(exited, "saw exit event");
+    });
+
+    await check(CHECK_STREAM_INCREMENTAL, async () => {
+      const started = Date.now();
+      let firstAt: number | undefined;
+      let secondAt: number | undefined;
+      let exitAt: number | undefined;
+      let seen = "";
+
+      for await (const ev of sb.commands.run(
+        "sh -c 'echo first; sleep 2; echo second'"
+      )) {
+        if (ev.type === "stdout") {
+          seen += ev.data;
+          if (firstAt === undefined && seen.includes("first")) {
+            firstAt = Date.now() - started;
+          }
+          if (secondAt === undefined && seen.includes("second")) {
+            secondAt = Date.now() - started;
+          }
+        }
+        if (ev.type === "exit") {
+          exitAt = Date.now() - started;
+        }
+      }
+
+      assert(
+        firstAt !== undefined,
+        `saw 'first' (got ${JSON.stringify(seen)})`
+      );
+      assert(secondAt !== undefined, "saw 'second'");
+      assert(exitAt !== undefined, "saw exit event");
+      assert(firstAt < secondAt, "'first' arrived before 'second'");
+      assert(
+        exitAt - firstAt > 800,
+        `'first' streamed well before exit (first=${firstAt}ms exit=${exitAt}ms)`
+      );
+    });
+
+    await check(CHECK_STDERR_SEPARATE, async () => {
+      const r = await sb.commands.run("sh -c 'echo o; echo e >&2'");
+      assert(
+        r.stdout.includes("o") && !r.stdout.includes("e"),
+        `stdout is only 'o' (got ${JSON.stringify(r.stdout)})`
+      );
+      assert(
+        r.stderr.includes("e") && !r.stderr.includes("o"),
+        `stderr is only 'e' (got ${JSON.stringify(r.stderr)})`
+      );
     });
   }
 
