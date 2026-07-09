@@ -55,16 +55,16 @@ await sandbox.resume();
 
 ## Capabilities
 
-| Capability                         |    Level    | Notes                            |
-| ---------------------------------- | :---------: | -------------------------------- |
-| `list` / `setTimeout`              |   native    | `setTimeout` = autostop interval |
-| `stop` / `pause`                   |   native    | resume re-starts the sandbox     |
-| `streaming`                        |  emulated   | `executeCommand` is buffered     |
-| `filesUpload`                      |   native    |                                  |
-| `codeInterpreter`                  |   native    | `sandbox.code` is defined        |
-| `statefulKernel`                   | unsupported |                                  |
-| `exposePort`                       |   native    | tokenized preview links          |
-| `region`                           |   native    | `target: "us" \| "eu"`           |
-| `snapshot` / `fork` / `background` | unsupported |                                  |
+| Capability                         |    Level    | Notes                                                    |
+| ---------------------------------- | :---------: | -------------------------------------------------------- |
+| `list` / `setTimeout`              |   native    | `setTimeout` = autostop interval                         |
+| `stop` / `pause`                   |   native    | resume re-starts the sandbox                             |
+| `streaming`                        |  emulated   | `executeCommand` is buffered; core tails for live output |
+| `filesUpload`                      |   native    |                                                          |
+| `codeInterpreter`                  |   native    | `sandbox.code` is defined                                |
+| `statefulKernel`                   | unsupported |                                                          |
+| `exposePort`                       |   native    | tokenized preview links                                  |
+| `region`                           |   native    | `target: "us" \| "eu"`                                   |
+| `snapshot` / `fork` / `background` | unsupported |                                                          |
 
 `preservesMemoryOnPause` and `preservesDiskOnStop` are both `true`; `previewModel` is `subdomain`.

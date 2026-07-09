@@ -92,6 +92,7 @@ export interface ExecOptions {
   signal?: AbortSignal;
   onStdout?: (chunk: string) => void;
   onStderr?: (chunk: string) => void;
+  stream?: boolean;
 }
 
 export interface TelemetryOptions {
@@ -125,7 +126,13 @@ export interface ExecResult {
 export type OutputEvent =
   | { type: "stdout"; data: string }
   | { type: "stderr"; data: string }
-  | { type: "exit"; exitCode: number; signal?: string };
+  | {
+      type: "exit";
+      exitCode: number;
+      signal?: string;
+      /** true when the code came from an rc file, not the transport. */
+      synthesized?: boolean;
+    };
 
 /**
  * Returned by `commands.run()`: BOTH a `Promise<ExecResult>` (await => buffered)
@@ -387,6 +394,22 @@ export interface Hooks {
   onError?(err: unknown, attempt: number): void | Promise<void>;
 }
 
+/** Controls in-sandbox tail streaming on `streaming: "emulated"` providers. */
+export type StreamingMode = "auto" | "tail" | "off";
+
+export interface StreamingOptions {
+  /** Defaults to `"auto"`. */
+  mode?: StreamingMode;
+  /** Poll backoff floor, in ms. Default 150. */
+  minPollMs?: number;
+  /** Poll backoff ceiling, in ms. Default 1000. */
+  maxPollMs?: number;
+  /** Max decoded bytes read per channel per poll. Default 262144. */
+  maxChunkBytes?: number;
+  /** Root directory for per-run scratch dirs. Default `/tmp/.sbox`. */
+  tmpDir?: string;
+}
+
 export interface ClientOptions<
   Caps extends CapabilityMap = CapabilityMap,
   Raw = unknown,
@@ -398,6 +421,8 @@ export interface ClientOptions<
   fetch?: typeof fetch;
   /** Opt-in lossy emulations (e.g. fork via snapshot+restore). */
   emulate?: (keyof CapabilityMap)[];
+  /** Core-provided live streaming on providers without native streaming. */
+  streaming?: StreamingOptions;
   defaultMetadata?: Record<string, string>;
   /** Plugins applied to every sandbox this client builds (incl. forks). */
   plugins?: readonly SandboxPlugin[];

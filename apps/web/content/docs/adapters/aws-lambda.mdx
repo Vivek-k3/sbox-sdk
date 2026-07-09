@@ -29,6 +29,15 @@ AWS Lambda MicroVMs give you isolation, lifecycle, and a dedicated HTTPS endpoin
   **inside the isolated MicroVM**; executing arbitrary commands is its purpose.
 </Callout>
 
+<Callout type="warn">
+  The runner's exec is buffered, so live streaming comes from the core's
+  in-sandbox tail. A detached command only makes progress while an invocation is
+  active. The poll loop keeps the environment thawed for the duration of a run,
+  but if the environment is recycled mid-command the run surfaces as `streamed
+  command ended without an exit status`. Pass `stream: false` for commands where
+  a buffered single request is a better fit.
+</Callout>
+
 ## Usage
 
 ```ts
@@ -73,15 +82,15 @@ await sandbox.destroy(); // TerminateMicrovm
 
 ## Capabilities
 
-| Capability          |    Level    | Notes                                |
-| ------------------- | :---------: | ------------------------------------ |
-| `list` / `region`   |   native    |                                      |
-| `pause`             |   native    | `Suspend` preserves memory + disk    |
-| `stop`              | unsupported | only run / suspend / terminate       |
-| `streaming`         |  emulated   | runner returns buffered output       |
-| `filesUpload`       |   native    | via the runner                       |
-| `exposePort`        |   native    | endpoint + `X-aws-proxy-port` + JWE  |
-| `codeInterpreter`   | unsupported |                                      |
-| `snapshot` / `fork` | unsupported | the image is the build-time snapshot |
+| Capability          |    Level    | Notes                                          |
+| ------------------- | :---------: | ---------------------------------------------- |
+| `list` / `region`   |   native    |                                                |
+| `pause`             |   native    | `Suspend` preserves memory + disk              |
+| `stop`              | unsupported | only run / suspend / terminate                 |
+| `streaming`         |  emulated   | runner is buffered; core tails for live output |
+| `filesUpload`       |   native    | via the runner                                 |
+| `exposePort`        |   native    | endpoint + `X-aws-proxy-port` + JWE            |
+| `codeInterpreter`   | unsupported |                                                |
+| `snapshot` / `fork` | unsupported | the image is the build-time snapshot           |
 
 `preservesMemoryOnPause` is `true`; `previewModel` is `tunnel`.

@@ -14,6 +14,7 @@ import {
 import type { ProviderAttempt } from "./errors.js";
 import type { MergePlugins, SandboxPlugin } from "./plugin.js";
 import { buildSandbox } from "./sandbox.js";
+import { resolveStreaming } from "./tail-exec.js";
 import {
   createTelemetryReporter,
   durationBucket,
@@ -55,6 +56,12 @@ export function createSandboxClient<
     plugins?: Ps;
   }
 ): SandboxClient<Caps, Raw, MergePlugins<Ps>>;
+/**
+ * Creates a sandbox client with provider selection, retries, fallback handling, hooks, plugins, and telemetry.
+ *
+ * @param options - Client configuration.
+ * @returns The configured sandbox client.
+ */
 export function createSandboxClient(options?: ClientOptions): SandboxClient {
   const provider: SandboxProvider = options?.provider ?? memory();
   const fetchImpl: typeof fetch = options?.fetch ?? globalThis.fetch;
@@ -83,6 +90,7 @@ export function createSandboxClient(options?: ClientOptions): SandboxClient {
     emulate: options?.emulate,
     fetch: fetchImpl,
     plugins,
+    streaming: resolveStreaming(options?.streaming),
     telemetry,
   };
 
