@@ -21,7 +21,12 @@ import {
   shellQuote,
 } from "./shell.js";
 import { durationBucket, errorCode } from "./telemetry.js";
-import type { TelemetryEventName, TelemetryReporter } from "./telemetry.js";
+import type {
+  TelemetryContext,
+  TelemetryEventName,
+  TelemetryReporter,
+  TelemetryValue,
+} from "./telemetry.js";
 import type {
   CallContext,
   CodeAPI,
@@ -49,6 +54,8 @@ export interface BuildSandboxBase {
   /** Plugins to graft onto every sandbox (applied here so forks inherit them). */
   plugins?: readonly SandboxPlugin[];
   telemetry?: TelemetryReporter;
+  /** Non-secret create-time dims inherited by command/destroy events. */
+  telemetryContext?: TelemetryContext;
 }
 
 export function buildSandbox<Caps extends CapabilityMap, Raw>(
@@ -70,14 +77,19 @@ export function buildSandbox<Caps extends CapabilityMap, Raw>(
   const wrapErr = (e: unknown): SandboxError =>
     provider.mapError?.(e) ?? SandboxError.wrap(e, name);
 
+  const telemetryContext = base.telemetryContext ?? {};
+
   const trackOutcome = (
     event: TelemetryEventName,
     startedAt: number,
     ok: boolean,
-    extra: Record<string, string | number | boolean | null | undefined> = {}
+    extra: Record<string, TelemetryValue> = {}
   ): void => {
+    const durationMs = Math.max(0, Date.now() - startedAt);
     base.telemetry?.track(event, {
-      duration_bucket: durationBucket(Date.now() - startedAt),
+      ...telemetryContext,
+      duration_bucket: durationBucket(durationMs),
+      duration_ms: durationMs,
       ok,
       provider: name,
       ...extra,
@@ -142,7 +154,9 @@ export function buildSandbox<Caps extends CapabilityMap, Raw>(
         mapError: wrapErr,
         onComplete: (outcome) => {
           base.telemetry?.track("command_run", {
+            ...telemetryContext,
             duration_bucket: durationBucket(outcome.durationMs),
+            duration_ms: outcome.durationMs,
             error_code: outcome.error ? errorCode(outcome.error) : undefined,
             exit_code:
               typeof outcome.exitCode === "number"

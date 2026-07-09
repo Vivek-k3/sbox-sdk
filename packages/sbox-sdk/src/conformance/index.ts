@@ -89,6 +89,10 @@ export async function runConformance(
       r.stdout.trim() === "hi",
       `stdout 'hi' (got ${JSON.stringify(r.stdout)})`
     );
+    assert(
+      typeof r.durationMs === "number" && r.durationMs >= 0,
+      `durationMs >= 0 (got ${r.durationMs})`
+    );
   });
 
   await check("exec: non-zero exit is data, not throw", async () => {

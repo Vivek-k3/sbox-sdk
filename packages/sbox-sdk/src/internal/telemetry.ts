@@ -1,17 +1,21 @@
 import pkg from "../../package.json" with { type: "json" };
 /**
- * Anonymous, opt-out product telemetry. A `TelemetryReporter` batches coarse
- * lifecycle/command events (buckets and outcome flags only — never secrets,
- * ids, or command strings) and ships them to PostHog over the injected `fetch`.
- * The router and `buildSandbox` are the only callers; when disabled (option,
- * env opt-out, or a runtime without `fetch`) a no-op reporter is returned so
- * telemetry can never observably alter SDK behavior.
+ * Anonymous, opt-out product telemetry. A `TelemetryReporter` batches lifecycle
+ * and command events (outcome flags, duration buckets + raw ms, and non-secret
+ * sandbox config dims — never secrets, ids, or command strings) and ships them
+ * to PostHog over the injected `fetch`. The router and `buildSandbox` are the
+ * only callers; when disabled (option, env opt-out, or a runtime without
+ * `fetch`) a no-op reporter is returned so telemetry can never observably alter
+ * SDK behavior.
  */
 import { SandboxError } from "./errors.js";
 import { detectRuntime } from "./runtime.js";
-import type { TelemetryOptions } from "./types.js";
+import type { SandboxSpec, TelemetryOptions } from "./types.js";
 
-type TelemetryValue = string | number | boolean | null | undefined;
+export type TelemetryValue = string | number | boolean | null | undefined;
+
+/** Non-secret create-time dims inherited by later events on the same sandbox. */
+export type TelemetryContext = Readonly<Record<string, TelemetryValue>>;
 
 export type TelemetryEventName =
   | "client_initialized"
@@ -326,6 +330,40 @@ export function durationBucket(ms: number): string {
     return "5_29s";
   }
   return "gte_30s";
+}
+
+/** Drop undefined entries so PostHog payloads stay sparse. */
+export function compactTelemetry(
+  properties: Record<string, TelemetryValue>
+): Record<string, TelemetryValue> {
+  const out: Record<string, TelemetryValue> = {};
+  for (const [key, value] of Object.entries(properties)) {
+    if (value !== undefined) {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+/**
+ * Non-secret summary of a create `SandboxSpec` for anonymous trend analysis.
+ * Never includes names, metadata values, env/secret keys or values, or ids.
+ */
+export function telemetryContextFromSpec(spec: SandboxSpec): TelemetryContext {
+  return compactTelemetry({
+    disk_mb: spec.resources?.diskMB,
+    has_env: spec.env !== undefined && Object.keys(spec.env).length > 0,
+    has_gpu: spec.resources?.gpu !== undefined,
+    has_secrets: (spec.secrets?.length ?? 0) > 0,
+    has_volumes: (spec.volumes?.length ?? 0) > 0,
+    memory_mb: spec.resources?.memoryMB,
+    on_idle: spec.onIdle,
+    port_count: spec.ports?.length,
+    region: spec.region,
+    template: spec.template,
+    ttl_ms: spec.ttlMs,
+    vcpus: spec.resources?.vcpus,
+  });
 }
 
 export function errorCode(error: unknown): string {
