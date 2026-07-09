@@ -60,6 +60,15 @@ export interface BuildSandboxBase {
   streaming?: ResolvedStreaming;
 }
 
+/**
+ * Builds a sandbox implementation for a provider and driver handle.
+ *
+ * @param provider - The sandbox provider definition and capability metadata
+ * @param handle - The underlying driver handle used to perform sandbox operations
+ * @param base - Shared runtime services and configuration used by the sandbox
+ * @param setup - Context passed to plugin setup hooks
+ * @returns The constructed sandbox
+ */
 export function buildSandbox<Caps extends CapabilityMap, Raw>(
   provider: SandboxProvider<Caps, Raw>,
   handle: import("./types.js").DriverHandle<Raw>,

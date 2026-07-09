@@ -56,6 +56,12 @@ export function createSandboxClient<
     plugins?: Ps;
   }
 ): SandboxClient<Caps, Raw, MergePlugins<Ps>>;
+/**
+ * Creates a sandbox client with provider selection, retries, fallback handling, hooks, plugins, and telemetry.
+ *
+ * @param options - Client configuration.
+ * @returns The configured sandbox client.
+ */
 export function createSandboxClient(options?: ClientOptions): SandboxClient {
   const provider: SandboxProvider = options?.provider ?? memory();
   const fetchImpl: typeof fetch = options?.fetch ?? globalThis.fetch;

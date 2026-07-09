@@ -13,7 +13,12 @@ export const EXIT_MARKER = "__sbox_rc";
 /** POSIX-ish env var name: letter/underscore, then letters/digits/underscores. */
 const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-/** POSIX-safe single-quote escaping: wrap in '...', and encode embedded quotes. */
+/**
+ * Escapes a string for safe use as a POSIX shell argument.
+ *
+ * @param value - The string to escape.
+ * @returns The value wrapped in single quotes with embedded single quotes encoded.
+ */
 export function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
@@ -32,10 +37,13 @@ export interface BuiltExec {
 }
 
 /**
- * Unconditionally bake cwd/env into a compound shell string — no `sh -c` wrapper
- * and no exit marker. `buildExecCommand` uses this for providers that can't take
- * per-command cwd/env; the tail-streaming path uses it for every provider, so the
- * detached inner command carries its own environment.
+ * Embeds the working directory and environment variables into a shell command string.
+ *
+ * @param rawCmd - The command to wrap.
+ * @param cwd - The working directory to set before running the command.
+ * @param env - Environment variables to export before running the command.
+ * @returns The compound shell command string.
+ * @throws SandboxError When an environment variable name is invalid.
  */
 export function bakeCwdEnv(
   rawCmd: string,
@@ -64,10 +72,12 @@ export function bakeCwdEnv(
 }
 
 /**
- * Decide how a command is executed given a provider's behavioral flags:
- * - native cwd/env  -> pass cwd/env straight through as ExecOptions
- * - emulated cwd/env -> bake `cd ... && export ...; cmd` into a `sh -c` string
- * - non-native exit code -> append `; echo __sbox_rc=$?` for the core to parse
+ * Builds a command plan for remote execution based on capability flags.
+ *
+ * @param rawCmd - The command to run.
+ * @param opts - Execution options to apply.
+ * @param flags - Provider capabilities that determine whether `cwd`, `env`, and the exit code are handled natively.
+ * @returns A constructed execution plan containing the command string, adjusted options, and whether stdout should be parsed for an exit marker.
  */
 export function buildExecCommand(
   rawCmd: string,

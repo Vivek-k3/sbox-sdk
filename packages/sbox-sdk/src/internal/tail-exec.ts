@@ -70,7 +70,12 @@ const SIGNAL_NUMBERS: Record<string, number> = {
   TERM: 15,
 };
 
-/** `"SIGTERM"` / `"TERM"` / `"15"` -> `"TERM"`. Unknown names pass through. */
+/**
+ * Normalizes a signal name.
+ *
+ * @param signal - The signal name to normalize
+ * @returns The uppercase signal name with an optional `SIG` prefix removed, or `TERM` when no signal is provided
+ */
 function normalizeSignal(signal: string | undefined): string {
   if (!signal) {
     return "TERM";
@@ -79,10 +84,23 @@ function normalizeSignal(signal: string | undefined): string {
   return bare.toUpperCase();
 }
 
+/**
+ * Converts a signal name to its numeric value.
+ *
+ * @param signal - The signal name to convert
+ * @returns The numeric signal value, or `15` for unknown signals
+ */
 function signalNumber(signal: string): number {
   return SIGNAL_NUMBERS[normalizeSignal(signal)] ?? 15;
 }
 
+/**
+ * Validates that a value is a positive finite integer.
+ *
+ * @param name - The configuration field name used in the error message
+ * @param value - The value to validate
+ * @returns The validated value
+ */
 function positiveInteger(name: string, value: number): number {
   if (!Number.isFinite(value) || !Number.isInteger(value) || value <= 0) {
     throw new SandboxError(
@@ -93,6 +111,13 @@ function positiveInteger(name: string, value: number): number {
   return value;
 }
 
+/**
+ * Validates an optional positive integer.
+ *
+ * @param name - The value name used in validation errors
+ * @param value - The value to validate
+ * @returns The validated integer, or `undefined` when no value is provided
+ */
 function optionalPositiveInteger(
   name: string,
   value: number | undefined
@@ -104,14 +129,21 @@ function optionalPositiveInteger(
 // Shell templates
 // ---------------------------------------------------------------------------
 
-/** Wrap a script for the transport: `sh -c '<script>'`. */
+/**
+ * Wraps a script for execution with `sh -c`.
+ *
+ * @param script - The shell script to wrap
+ * @returns The wrapped command string
+ */
 export function shWrap(script: string): string {
   return `sh -c ${shellQuote(script)}`;
 }
 
 /**
- * Verifies the sandbox can host the tail mechanism: writable tmp plus `head -c`,
- * `tail -c`, and `base64` with the flags the poll loop uses.
+ * Builds a shell probe for tail-streaming support.
+ *
+ * @param tmpDir - Temporary directory to create and test inside the sandbox
+ * @returns A shell script that prints `TAIL_OK` when the required file operations and utilities are available, or `TAIL_FAIL` otherwise
  */
 export function buildTailProbe(tmpDir: string): string {
   const qt = shellQuote(tmpDir);
@@ -126,8 +158,10 @@ export function buildTailProbe(tmpDir: string): string {
 }
 
 /**
- * Detached wrapper: records `$$` as pid, runs the user command in a subshell so
- * `exit` cannot kill the wrapper, and writes stdout/stderr/rc atomically.
+ * Builds the detached wrapper script that runs the user command and records its process ID, output, and exit code.
+ *
+ * @param dir - The run directory for wrapper state files
+ * @param bakedUserCmd - The shell-quoted user command to execute inside the wrapper
  */
 export function buildTailInner(dir: string, bakedUserCmd: string): string {
   const qd = shellQuote(dir);
@@ -141,8 +175,11 @@ export function buildTailInner(dir: string, bakedUserCmd: string): string {
 }
 
 /**
- * Creates the run dir and spawns the wrapper detached. Emits `TAIL_FAIL` before
- * spawn so a fallback is safe.
+ * Builds the launch script for the detached tail-stream wrapper.
+ *
+ * @param dir - Run directory for wrapper state and output files
+ * @param innerCmd - Shell command that runs the wrapper body
+ * @returns A shell script that initializes the run directory, starts the wrapper detached, and prints a launch sentinel
  */
 export function buildTailLaunch(dir: string, innerCmd: string): string {
   const qd = shellQuote(dir);
@@ -162,7 +199,15 @@ export function buildTailLaunch(dir: string, innerCmd: string): string {
   ].join("\n");
 }
 
-/** One poll round trip: new bytes on each channel plus run state (`R:*`). */
+/**
+ * Builds a poll script that returns newly written output bytes and wrapper state.
+ *
+ * @param dir - Run directory containing the wrapper files
+ * @param outOff - Byte offset for stdout
+ * @param errOff - Byte offset for stderr
+ * @param cap - Maximum number of bytes to read from each channel
+ * @returns A shell script that emits base64-encoded stdout and stderr chunks, the wrapper PID, and `R:*` state
+ */
 export function buildTailPoll(
   dir: string,
   outOff: number,
@@ -188,7 +233,12 @@ export function buildTailPoll(
   ].join("\n");
 }
 
-/** Signals the process group when possible, else the wrapper pid. */
+/**
+ * Builds a shell command that signals the recorded wrapper process.
+ *
+ * @param sig - The signal name to send.
+ * @returns A shell script that sends the signal to the wrapper's process group when possible, otherwise to the wrapper process itself.
+ */
 export function buildTailKill(dir: string, sig: string): string {
   const qd = shellQuote(dir);
   const s = normalizeSignal(sig);
@@ -199,6 +249,12 @@ export function buildTailKill(dir: string, sig: string): string {
   ].join("\n");
 }
 
+/**
+ * Removes the run directory and its contents.
+ *
+ * @param dir - The directory to remove
+ * @returns A shell command that deletes `dir` recursively
+ */
 export function buildTailCleanup(dir: string): string {
   return `rm -rf ${shellQuote(dir)}`;
 }
@@ -215,7 +271,12 @@ export interface ResolvedStreaming extends StreamingOptions {
   mode: StreamingMode;
 }
 
-/** Fill in streaming defaults. */
+/**
+ * Applies defaults and validates streaming settings.
+ *
+ * @param streaming - Streaming configuration to normalize
+ * @returns The resolved streaming configuration with default values applied
+ */
 export function resolveStreaming(
   streaming: StreamingOptions | undefined
 ): ResolvedStreaming {
@@ -251,7 +312,11 @@ export function resolveStreaming(
   return resolved;
 }
 
-/** Does this run go through the in-sandbox tail path? */
+/**
+ * Determines whether the in-sandbox tail streaming path applies.
+ *
+ * @returns `true` when tail streaming is enabled for the current request, `false` otherwise.
+ */
 export function shouldTailStream(args: {
   mode: StreamingMode;
   streamingCapability: CapabilityLevel;
@@ -295,8 +360,11 @@ interface PollReading {
 type LaunchOutcome = "ok" | "prespawn-fail";
 
 /**
- * Sleep, waking early on abort. Releases the timer and listener each round so
- * long polls do not leak on a caller-owned signal.
+ * Sleeps until the delay elapses or the abort signal fires.
+ *
+ * @param ms - The delay in milliseconds
+ * @param signal - An abort signal that can end the wait early
+ * @returns Resolves when the delay completes or the signal is aborted
  */
 function sleepUntil(ms: number, signal?: AbortSignal): Promise<void> {
   const held: { id?: ReturnType<typeof setTimeout>; onAbort?: () => void } = {};
@@ -318,6 +386,11 @@ function sleepUntil(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+/**
+ * Delays for the requested duration.
+ *
+ * @param signal - Aborts the delay early when already aborted or during the wait
+ */
 function delay(ms: number, signal?: AbortSignal): Promise<void> {
   if (ms <= 0 || signal?.aborted) {
     return Promise.resolve();
@@ -760,6 +833,12 @@ class TailExec implements DriverExec {
   }
 }
 
+/**
+ * Creates a tail-streaming exec driver.
+ *
+ * @param cfg - Tail streaming configuration
+ * @returns A `DriverExec` that streams output from the sandboxed wrapper
+ */
 export function createTailExec(cfg: TailExecConfig): DriverExec {
   return new TailExec(cfg);
 }

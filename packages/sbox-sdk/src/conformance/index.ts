@@ -30,12 +30,25 @@ export interface ConformanceOptions {
 export const CHECK_STREAM_INCREMENTAL = "exec: streaming is incremental";
 export const CHECK_STDERR_SEPARATE = "exec: stdout and stderr stay separate";
 
+/**
+ * Throws an error when the condition is falsy.
+ *
+ * @param cond - The condition to verify
+ * @param msg - The error message to use when the condition fails
+ */
 function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) {
     throw new Error(msg);
   }
 }
 
+/**
+ * Runs the conformance test suite for a sandbox provider.
+ *
+ * @param provider - The sandbox provider to test
+ * @param options - Conformance checks to skip and capability values to verify
+ * @returns A conformance report with the executed checks and overall pass status
+ */
 export async function runConformance(
   provider: SandboxProvider,
   options: ConformanceOptions = {}
