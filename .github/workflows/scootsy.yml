@@ -33,6 +33,9 @@ jobs:
           persist-credentials: false
           ref: ${{ vars.SCOOTSY_RUNNER_REF || 'main' }}
           repository: ${{ vars.SCOOTSY_RUNNER_REPOSITORY || 'Vivek-k3/aisfactory' }}
+          # The source is public. Do not offer this target repository's scoped
+          # token to a second repository, which GitHub treats as inaccessible.
+          token: ""
       - uses: actions/setup-node@v4
         with:
           node-version: 24
