@@ -1,0 +1,61 @@
+[WARN] Unsupported engine: wanted: {"node":"24.x"} (current: {"node":"v26.5.0","pnpm":"11.17.0"})
+Scope: all 12 workspace projects
+✓ Lockfile passes supply-chain policies (verified 1h ago)
+Lockfile is up to date, resolution step is skipped
+Already up to date
+
+Done in 513ms using pnpm v11.17.0
+name: Scootsy
+run-name: Scootsy · ${{ inputs.scootsy_run_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      scootsy_run_id:
+        description: Scootsy run identifier
+        required: true
+        type: string
+      scootsy_run_capability:
+        description: Short-lived capability minted by Scootsy
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  scootsy:
+    runs-on: ${{ vars.SCOOTSY_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Checkout Scootsy runner
+        uses: actions/checkout@v6
+        with:
+          path: .scootsy
+          persist-credentials: false
+          ref: ${{ vars.SCOOTSY_RUNNER_REF || 'main' }}
+          repository: ${{ vars.SCOOTSY_RUNNER_REPOSITORY || 'Vivek-k3/aisfactory' }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install Scootsy runner
+        run: |
+          corepack enable
+          pnpm --dir .scootsy install --frozen-lockfile
+      - name: Run Scootsy
+        run: pnpm --dir .scootsy exec node --experimental-strip-types packages/github-actions/src/cli.ts run
+        env:
+          SCOOTSY_RUN_CAPABILITY: ${{ inputs.scootsy_run_capability }}
+          SCOOTSY_RUN_ID: ${{ inputs.scootsy_run_id }}
+          SCOOTSY_URL: ${{ vars.SCOOTSY_URL }}
+          GITHUB_TOKEN: ${{ github.token }}
+          # Add only the provider credential chosen in Scootsy settings.
+          # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SCOOTSY_CODEX_AUTH_JSON: ${{ secrets.SCOOTSY_CODEX_AUTH_JSON }}
+          SCOOTSY_CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.SCOOTSY_CLAUDE_CODE_OAUTH_TOKEN }}
