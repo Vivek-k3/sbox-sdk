@@ -27,15 +27,14 @@ jobs:
         with:
           fetch-depth: 0
       - name: Checkout Scootsy runner
-        uses: actions/checkout@v6
-        with:
-          path: .scootsy
-          persist-credentials: false
-          ref: ${{ vars.SCOOTSY_RUNNER_REF || 'main' }}
-          repository: ${{ vars.SCOOTSY_RUNNER_REPOSITORY || 'Vivek-k3/aisfactory' }}
-          # The source is public. Do not offer this target repository's scoped
-          # token to a second repository, which GitHub treats as inaccessible.
-          token: ""
+        env:
+          SCOOTSY_RUNNER_REF: ${{ vars.SCOOTSY_RUNNER_REF || 'main' }}
+          SCOOTSY_RUNNER_REPOSITORY: ${{ vars.SCOOTSY_RUNNER_REPOSITORY || 'Vivek-k3/aisfactory' }}
+        run: |
+          git init .scootsy
+          git -C .scootsy remote add origin "https://github.com/$SCOOTSY_RUNNER_REPOSITORY.git"
+          git -C .scootsy fetch --depth=1 origin "$SCOOTSY_RUNNER_REF"
+          git -C .scootsy checkout --detach FETCH_HEAD
       - uses: actions/setup-node@v4
         with:
           node-version: 24
