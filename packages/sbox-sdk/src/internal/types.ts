@@ -118,6 +118,8 @@ export interface ExecResult {
   readonly stdout: string;
   readonly stderr: string;
   readonly exitCode: number;
+  /** Wall-clock ms from exec start to completion (including non-zero exits). */
+  readonly durationMs: number;
   /** true when the exit code was parsed from a `$?` echo rather than native. */
   readonly exitCodeSynthesized?: boolean;
 }

@@ -5,18 +5,22 @@ description: sbox SDK collects limited anonymous usage data to understand adopti
 
 ## What we collect
 
-sbox SDK collects limited anonymous usage data by default. We use it to understand adoption, see which parts of the SDK are used, and prioritize improvements.
+sbox SDK collects limited anonymous usage data by default. We use it to understand adoption, see which parts of the SDK are used, prioritize improvements, and trend sandbox performance across providers.
 
-The data is intentionally coarse:
+The data is intentionally coarse and unlinkable to a person or tenant:
 
 - SDK version
 - runtime and platform
 - selected provider
 - operation type, such as creating a sandbox or running a command
 - success or failure
-- duration bucket
+- duration bucket and raw duration in milliseconds
 - error category
 - command exit code
+- create vs connect lifecycle (`create` | `connect`)
+- non-secret create config dims when supplied: template / image / blueprint id, region, vcpus, memory_mb, disk_mb, has_gpu, ttl_ms, on_idle, port_count, and presence flags for env / volumes / secrets
+
+`template` is the caller-supplied id (image, blueprint, snapshot, or runtime). It may reflect private naming in your org; opt out if that is sensitive.
 
 Usage data may be sent from any environment where the SDK runs, including local development, CI, tests, previews, and production.
 
@@ -30,11 +34,13 @@ sbox SDK does not collect:
 - prompts or model inputs
 - command strings
 - file paths or file contents
-- environment variables
+- environment variable keys or values
+- secret keys or values
 - stdout or stderr
 - sandbox ids
-- project names
+- project or sandbox names
 - metadata values
+- GPU model strings
 - provider-specific request payloads
 
 ## How to opt out

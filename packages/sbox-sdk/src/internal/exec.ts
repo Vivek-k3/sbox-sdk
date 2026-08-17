@@ -124,13 +124,21 @@ class ExecHandleImpl implements ExecHandle {
     this.#notify();
   }
 
+  #durationMs(): number {
+    return Math.max(0, Date.now() - this.#startedAt);
+  }
+
   #finish(err: unknown): void {
     this.#done = true;
     if (err !== null && err !== undefined) {
       this.#error = this.#opts.mapError
         ? this.#opts.mapError(err)
         : SandboxError.wrap(err);
-      this.#complete({ error: this.#error, ok: false });
+      this.#complete({
+        durationMs: this.#durationMs(),
+        error: this.#error,
+        ok: false,
+      });
       this.#rejectResult(this.#error);
       this.#notify();
       return;
@@ -144,27 +152,31 @@ class ExecHandleImpl implements ExecHandle {
         stderr += ev.data;
       }
     }
+    const durationMs = this.#durationMs();
     const result: ExecResult = {
+      durationMs,
       exitCode: this.#synthesized ? this.#synthExit : this.#exitCode,
       stderr,
       stdout,
       ...(this.#synthesized ? { exitCodeSynthesized: true } : {}),
     };
-    this.#complete({ exitCode: result.exitCode, ok: result.exitCode === 0 });
+    this.#complete({
+      durationMs,
+      exitCode: result.exitCode,
+      ok: result.exitCode === 0,
+    });
     this.#resolveResult(result);
     this.#notify();
   }
 
   #complete(outcome: {
+    durationMs: number;
     error?: unknown;
     exitCode?: number;
     ok: boolean;
   }): void {
     try {
-      this.#opts.onComplete?.({
-        ...outcome,
-        durationMs: Math.max(0, Date.now() - this.#startedAt),
-      });
+      this.#opts.onComplete?.(outcome);
     } catch {
       // Observers must not affect command behavior.
     }

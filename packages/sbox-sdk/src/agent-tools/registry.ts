@@ -132,6 +132,7 @@ const buildExec = (sandbox: Sandbox): ToolSpec =>
       }
       parts.push(`[exit ${res.exitCode}]`);
       return ok(parts.join("\n"), {
+        durationMs: res.durationMs,
         exitCode: res.exitCode,
         stderr: res.stderr,
         stdout: res.stdout,

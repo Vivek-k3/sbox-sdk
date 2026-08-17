@@ -18,6 +18,7 @@ import {
   createTelemetryReporter,
   durationBucket,
   errorCode,
+  telemetryContextFromSpec,
 } from "./telemetry.js";
 import type {
   CallContext,
@@ -143,16 +144,22 @@ export function createSandboxClient(options?: ClientOptions): SandboxClient {
         for (const pl of plugins) {
           await pl.onCreate?.(sandbox as Sandbox, {});
         }
+        const durationMs = Math.max(0, Date.now() - startedAt);
         telemetry.track("sandbox_connect", {
-          duration_bucket: durationBucket(Date.now() - startedAt),
+          duration_bucket: durationBucket(durationMs),
+          duration_ms: durationMs,
+          lifecycle: "connect",
           ok: true,
           provider: provider.name,
         });
         return sandbox as unknown as Sandbox;
       } catch (error) {
+        const durationMs = Math.max(0, Date.now() - startedAt);
         telemetry.track("sandbox_connect", {
-          duration_bucket: durationBucket(Date.now() - startedAt),
+          duration_bucket: durationBucket(durationMs),
+          duration_ms: durationMs,
           error_code: errorCode(error),
+          lifecycle: "connect",
           ok: false,
           provider: provider.name,
         });
@@ -166,6 +173,7 @@ export function createSandboxClient(options?: ClientOptions): SandboxClient {
     ): Promise<Sandbox> {
       const idem = spec.idempotencyKey ?? globalThis.crypto.randomUUID();
       const startedAt = Date.now();
+      const telemetryContext = telemetryContextFromSpec(spec);
       await hooks?.beforeCreate?.(spec);
       // Only fall back across providers when the caller supplied an idempotency
       // key — otherwise a retried create could orphan a second VM.
@@ -188,12 +196,21 @@ export function createSandboxClient(options?: ClientOptions): SandboxClient {
             )
           );
           await hooks?.afterCreate?.({ id: handle.id, provider: p.name });
-          const sandbox = buildSandbox(p, handle, base, { createOptions });
+          const sandbox = buildSandbox(
+            p,
+            handle,
+            { ...base, telemetryContext },
+            { createOptions }
+          );
           for (const pl of plugins) {
             await pl.onCreate?.(sandbox as Sandbox, { createOptions });
           }
+          const durationMs = Math.max(0, Date.now() - startedAt);
           telemetry.track("sandbox_create", {
-            duration_bucket: durationBucket(Date.now() - startedAt),
+            ...telemetryContext,
+            duration_bucket: durationBucket(durationMs),
+            duration_ms: durationMs,
+            lifecycle: "create",
             ok: true,
             provider: p.name,
           });
@@ -203,17 +220,25 @@ export function createSandboxClient(options?: ClientOptions): SandboxClient {
         }
       }
       if (attempts.length === 1) {
+        const durationMs = Math.max(0, Date.now() - startedAt);
         telemetry.track("sandbox_create", {
-          duration_bucket: durationBucket(Date.now() - startedAt),
+          ...telemetryContext,
+          duration_bucket: durationBucket(durationMs),
+          duration_ms: durationMs,
           error_code: errorCode(attempts[0]!.error),
+          lifecycle: "create",
           ok: false,
           provider: attempts[0]!.provider,
         });
         throw attempts[0]!.error;
       }
+      const durationMs = Math.max(0, Date.now() - startedAt);
       telemetry.track("sandbox_create", {
-        duration_bucket: durationBucket(Date.now() - startedAt),
+        ...telemetryContext,
+        duration_bucket: durationBucket(durationMs),
+        duration_ms: durationMs,
         error_code: "AllProvidersFailed",
+        lifecycle: "create",
         ok: false,
         provider_count: attempts.length,
       });
@@ -224,14 +249,18 @@ export function createSandboxClient(options?: ClientOptions): SandboxClient {
       const startedAt = Date.now();
       try {
         await provider.dispose?.();
+        const durationMs = Math.max(0, Date.now() - startedAt);
         telemetry.track("client_dispose", {
-          duration_bucket: durationBucket(Date.now() - startedAt),
+          duration_bucket: durationBucket(durationMs),
+          duration_ms: durationMs,
           ok: true,
           provider: provider.name,
         });
       } catch (error) {
+        const durationMs = Math.max(0, Date.now() - startedAt);
         telemetry.track("client_dispose", {
-          duration_bucket: durationBucket(Date.now() - startedAt),
+          duration_bucket: durationBucket(durationMs),
+          duration_ms: durationMs,
           error_code: errorCode(error),
           ok: false,
           provider: provider.name,
@@ -261,9 +290,11 @@ export function createSandboxClient(options?: ClientOptions): SandboxClient {
         // Emit once on any exit — normal completion, a thrown error, or an
         // early consumer `break`/`return` (which unwinds through here). Early
         // termination is not a failure, so `ok` is false only when we caught.
+        const durationMs = Math.max(0, Date.now() - startedAt);
         telemetry.track("sandbox_list", {
           count,
-          duration_bucket: durationBucket(Date.now() - startedAt),
+          duration_bucket: durationBucket(durationMs),
+          duration_ms: durationMs,
           ok: failure === undefined,
           provider: provider.name,
           ...(failure === undefined ? {} : { error_code: failure }),

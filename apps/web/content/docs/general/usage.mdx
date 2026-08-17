@@ -33,7 +33,7 @@ await sandbox.commands.run("echo works offline");
 ```ts
 // Buffered — never throws on a non-zero exit; the exit code is data:
 const res = await sandbox.commands.run("npm test", { cwd: "/app" });
-console.log(res.exitCode, res.stdout, res.stderr);
+console.log(res.exitCode, res.durationMs, res.stdout, res.stderr);
 
 // Streamed — the SAME handle, iterated live:
 for await (const ev of sandbox.commands.run(["python", "train.py"])) {

@@ -15,6 +15,7 @@ const res = await sandbox.commands.run("npm test", { cwd: "/app" });
 res.exitCode; // number — non-zero is NOT an error
 res.stdout;
 res.stderr;
+res.durationMs; // wall-clock ms from start to completion
 
 // Streamed (same handle):
 for await (const ev of sandbox.commands.run(["python", "train.py"])) {
@@ -39,6 +40,7 @@ interface ExecResult {
   readonly stdout: string;
   readonly stderr: string;
   readonly exitCode: number;
+  readonly durationMs: number; // wall-clock ms from exec start to completion
   readonly exitCodeSynthesized?: boolean; // true when parsed from a $? echo
 }
 ```

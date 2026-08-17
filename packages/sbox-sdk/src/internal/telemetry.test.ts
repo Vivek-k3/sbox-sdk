@@ -76,8 +76,18 @@ describe("telemetry", () => {
       },
     });
 
-    const sandbox = await client.create();
-    await sandbox.commands.run("echo do-not-send-this");
+    const sandbox = await client.create({
+      env: { SECRET_TOKEN: "super-secret-value" },
+      metadata: { project: "acme-internal" },
+      name: "my-private-sandbox",
+      ports: [3000, 8080],
+      region: "us-west",
+      resources: { diskMB: 10_240, gpu: "a100", memoryMB: 4096, vcpus: 2 },
+      template: "base-python",
+      ttlMs: 60_000,
+    });
+    const result = await sandbox.commands.run("echo do-not-send-this");
+    expect(result.durationMs).toBeGreaterThanOrEqual(0);
     await sandbox.destroy();
     await client.dispose();
 
@@ -92,9 +102,58 @@ describe("telemetry", () => {
       ])
     );
 
+    const createEvent = events.find(
+      (event) => event.event === "sbox_sdk_sandbox_create"
+    );
+    expect(createEvent?.properties).toMatchObject({
+      disk_mb: 10_240,
+      has_env: true,
+      has_gpu: true,
+      lifecycle: "create",
+      memory_mb: 4096,
+      ok: true,
+      port_count: 2,
+      provider: "memory",
+      region: "us-west",
+      template: "base-python",
+      ttl_ms: 60_000,
+      vcpus: 2,
+    });
+    expect(typeof createEvent?.properties.duration_ms).toBe("number");
+    expect(createEvent?.properties.duration_ms).toBeGreaterThanOrEqual(0);
+    expect(createEvent?.properties).not.toHaveProperty("name");
+    expect(createEvent?.properties).not.toHaveProperty("gpu");
+
+    const commandEvent = events.find(
+      (event) => event.event === "sbox_sdk_command_run"
+    );
+    expect(commandEvent?.properties).toMatchObject({
+      memory_mb: 4096,
+      ok: true,
+      provider: "memory",
+      region: "us-west",
+      template: "base-python",
+      vcpus: 2,
+    });
+    expect(typeof commandEvent?.properties.duration_ms).toBe("number");
+    expect(commandEvent?.properties.duration_ms).toBeGreaterThanOrEqual(0);
+
+    const destroyEvent = events.find(
+      (event) => event.event === "sbox_sdk_sandbox_destroy"
+    );
+    expect(destroyEvent?.properties).toMatchObject({
+      template: "base-python",
+      provider: "memory",
+    });
+    expect(typeof destroyEvent?.properties.duration_ms).toBe("number");
+
     const serialized = JSON.stringify(bodies);
     expect(serialized).not.toContain("do-not-send-this");
     expect(serialized).not.toContain(sandbox.id);
+    expect(serialized).not.toContain("super-secret-value");
+    expect(serialized).not.toContain("acme-internal");
+    expect(serialized).not.toContain("my-private-sandbox");
+    expect(serialized).not.toContain("a100");
     expect(
       events.every(
         (event) => event.properties.$process_person_profile === false
