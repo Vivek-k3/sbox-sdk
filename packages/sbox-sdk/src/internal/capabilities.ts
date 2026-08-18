@@ -17,6 +17,7 @@ export interface CapabilityMap {
   setTimeout: CapabilityLevel;
   // exec
   background: CapabilityLevel;
+  /** `emulated` => core tails output files inside the sandbox (`tail-exec.ts`). */
   streaming: CapabilityLevel;
   killProcess: CapabilityLevel;
   pty: CapabilityLevel;

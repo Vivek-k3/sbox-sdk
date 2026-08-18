@@ -25,6 +25,38 @@ for await (const ev of sandbox.commands.run(["python", "train.py"])) {
 
 `cmd` is a `string` or `string[]`. The handle also exposes `pid: Promise<string>`, `stdout` / `stderr` as `ReadableStream`s, `kill(signal?)`, and `writeStdin(data)`.
 
+## Streaming is a guarantee, not a per-provider feature
+
+Live streaming works on **every** provider. Where a provider's transport streams natively (`streaming: "native"`), the SDK uses it. Where a provider's exec is fire-once (`streaming: "emulated"`), the core runs your command detached inside the sandbox, redirects its output to files, and tails them — so `for await`, `onStdout`/`onStderr`, and the byte streams all deliver output while the command is still running.
+
+On those providers the tail path also gives you a working `kill()`, a real in-sandbox `pid`, correct stdout/stderr separation, and — because each poll is its own short request — commands that outlive the transport's request timeout.
+
+Two consequences worth knowing:
+
+- `ExecResult.exitCodeSynthesized` is `true`, because the exit code is read from a file rather than reported by the transport.
+- Passing `stdin` opts out (the command runs buffered), since the detached command reads from `/dev/null`.
+
+If the sandbox can't host the mechanism (no POSIX shell, read-only `/tmp`), the SDK silently falls back to the provider's buffered exec. It never re-runs your command to do so.
+
+### Cost
+
+The tail path is not free: each poll is a full provider `exec` round-trip. A quiet long-running command polls at the `maxPollMs` ceiling (~1 poll/second by default), so a one-hour command costs on the order of a few thousand short execs. For providers that bill or rate-limit per exec, or cold-attach a container per exec, that is real spend that a single buffered call did not incur — and streaming is **on by default** for the 9 `emulated` providers.
+
+Tune it with `streaming: { minPollMs, maxPollMs, maxChunkBytes }`, or turn it off per call (`stream: false`) or per client (`mode: "off"`) for cost-sensitive workloads.
+
+```ts
+// Opt out for one command:
+await sandbox.commands.run("echo hi", { stream: false });
+
+// Or for the whole client:
+const client = createSandboxClient({
+  provider: daytona(),
+  streaming: { mode: "off" }, // "auto" (default) | "tail" | "off"
+});
+```
+
+`mode: "tail"` is the strict form: it throws rather than silently falling back, which is useful when live logs are a hard requirement. Note the host-capability probe is run and memoized **once per sandbox**, so whether `"tail"` throws is decided on the first `run()`, not re-evaluated per call.
+
 ### `ExecOptions`
 
 <AutoTypeTable
@@ -39,7 +71,8 @@ interface ExecResult {
   readonly stdout: string;
   readonly stderr: string;
   readonly exitCode: number;
-  readonly exitCodeSynthesized?: boolean; // true when parsed from a $? echo
+  // true when read from an rc file / a $? echo rather than the transport
+  readonly exitCodeSynthesized?: boolean;
 }
 ```
 
@@ -49,7 +82,7 @@ interface ExecResult {
 type OutputEvent =
   | { type: "stdout"; data: string }
   | { type: "stderr"; data: string }
-  | { type: "exit"; exitCode: number; signal?: string };
+  | { type: "exit"; exitCode: number; signal?: string; synthesized?: boolean };
 ```
 
 ## Other methods

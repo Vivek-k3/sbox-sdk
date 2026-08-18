@@ -84,6 +84,7 @@ export type {
 export {
   shellQuote,
   joinCmd,
+  bakeCwdEnv,
   buildExecCommand,
   parseLsOutput,
   parseStatOutput,

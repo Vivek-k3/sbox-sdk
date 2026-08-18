@@ -61,16 +61,16 @@ console.log(preview.url);
 
 ## Capabilities
 
-| Capability          |    Level    | Notes                       |
-| ------------------- | :---------: | --------------------------- |
-| `list`              |   native    |                             |
-| `exposePort`        |   native    | preview URLs                |
-| `privatePreview`    |   native    | signed (`public: false`)    |
-| `region`            |   native    | chosen at create            |
-| `volumes`           |   native    | mounted at create           |
-| `filesUpload`       |   native    | `fs.writeBinary`            |
-| `streaming`         |  emulated   | exec waits for completion   |
-| `pause` / `stop`    | unsupported | standby/resume is automatic |
-| `snapshot` / `fork` | unsupported |                             |
+| Capability          |    Level    | Notes                                                 |
+| ------------------- | :---------: | ----------------------------------------------------- |
+| `list`              |   native    |                                                       |
+| `exposePort`        |   native    | preview URLs                                          |
+| `privatePreview`    |   native    | signed (`public: false`)                              |
+| `region`            |   native    | chosen at create                                      |
+| `volumes`           |   native    | mounted at create                                     |
+| `filesUpload`       |   native    | `fs.writeBinary`                                      |
+| `streaming`         |  emulated   | exec waits for completion; core tails for live output |
+| `pause` / `stop`    | unsupported | standby/resume is automatic                           |
+| `snapshot` / `fork` | unsupported |                                                       |
 
 `perCommandEnvCwd` is `false` (core wraps); `preservesMemoryOnPause` is `true` (standby); `previewModel` is `subdomain`.

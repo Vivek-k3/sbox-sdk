@@ -5,11 +5,20 @@
  * input cannot break out of the intended command.
  */
 import type { CapabilityFlags } from "./capabilities.js";
+import { SandboxError } from "./errors.js";
 import type { DirEntry, ExecOptions } from "./types.js";
 
 export const EXIT_MARKER = "__sbox_rc";
 
-/** POSIX-safe single-quote escaping: wrap in '...', and encode embedded quotes. */
+/** POSIX-ish env var name: letter/underscore, then letters/digits/underscores. */
+const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * Escapes a string for safe use as a POSIX shell argument.
+ *
+ * @param value - The string to escape.
+ * @returns The value wrapped in single quotes with embedded single quotes encoded.
+ */
 export function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
@@ -28,10 +37,47 @@ export interface BuiltExec {
 }
 
 /**
- * Decide how a command is executed given a provider's behavioral flags:
- * - native cwd/env  -> pass cwd/env straight through as ExecOptions
- * - emulated cwd/env -> bake `cd ... && export ...; cmd` into a `sh -c` string
- * - non-native exit code -> append `; echo __sbox_rc=$?` for the core to parse
+ * Embeds the working directory and environment variables into a shell command string.
+ *
+ * @param rawCmd - The command to wrap.
+ * @param cwd - The working directory to set before running the command.
+ * @param env - Environment variables to export before running the command.
+ * @returns The compound shell command string.
+ * @throws SandboxError When an environment variable name is invalid.
+ */
+export function bakeCwdEnv(
+  rawCmd: string,
+  cwd: string | undefined,
+  env: Record<string, string> | undefined
+): string {
+  let inner = rawCmd;
+  if (env && Object.keys(env).length > 0) {
+    const exports = Object.entries(env)
+      .map(([k, v]) => {
+        if (!ENV_KEY_RE.test(k)) {
+          throw new SandboxError(
+            "Validation",
+            `invalid environment variable name: ${JSON.stringify(k)}`
+          );
+        }
+        return `export ${k}=${shellQuote(v)};`;
+      })
+      .join(" ");
+    inner = `${exports} ${inner}`;
+  }
+  if (cwd) {
+    inner = `cd ${shellQuote(cwd)} && ${inner}`;
+  }
+  return inner;
+}
+
+/**
+ * Builds a command plan for remote execution based on capability flags.
+ *
+ * @param rawCmd - The command to run.
+ * @param opts - Execution options to apply.
+ * @param flags - Provider capabilities that determine whether `cwd`, `env`, and the exit code are handled natively.
+ * @returns A constructed execution plan containing the command string, adjusted options, and whether stdout should be parsed for an exit marker.
  */
 export function buildExecCommand(
   rawCmd: string,
@@ -52,15 +98,7 @@ export function buildExecCommand(
     inner = `${inner}; echo ${EXIT_MARKER}=$?`;
   }
   if (emulateCwdEnv) {
-    if (hasEnv) {
-      const exports = Object.entries(opts.env as Record<string, string>)
-        .map(([k, v]) => `export ${k}=${shellQuote(v)};`)
-        .join(" ");
-      inner = `${exports} ${inner}`;
-    }
-    if (hasCwd) {
-      inner = `cd ${shellQuote(opts.cwd as string)} && ${inner}`;
-    }
+    inner = bakeCwdEnv(inner, opts.cwd, opts.env);
   }
 
   // Strip the now-baked cwd/env from the options handed to the adapter.

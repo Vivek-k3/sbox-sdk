@@ -58,15 +58,15 @@ A sandbox is a **deployment service** that runs the base [`template`](/templates
 
 ## Capabilities
 
-| Capability            |    Level    | Notes                              |
-| --------------------- | :---------: | ---------------------------------- |
-| `list`                |   native    |                                    |
-| `pause`               |   native    | scale-to-zero (volume kept)        |
-| `streaming`           |  emulated   | exec session is buffered           |
-| `filesUpload`         |   native    | via `exec` + base64                |
-| `exposePort`          |   native    | public service port → DNS          |
-| `codeInterpreter`     | unsupported |                                    |
-| `stop` / `setTimeout` | unsupported | `pause` is the keep-disk state     |
-| `snapshot` / `fork`   | unsupported | services platform, no VM snapshots |
+| Capability            |    Level    | Notes                                             |
+| --------------------- | :---------: | ------------------------------------------------- |
+| `list`                |   native    |                                                   |
+| `pause`               |   native    | scale-to-zero (volume kept)                       |
+| `streaming`           |  emulated   | exec session buffered; core tails for live output |
+| `filesUpload`         |   native    | via `exec` + base64                               |
+| `exposePort`          |   native    | public service port → DNS                         |
+| `codeInterpreter`     | unsupported |                                                   |
+| `stop` / `setTimeout` | unsupported | `pause` is the keep-disk state                    |
+| `snapshot` / `fork`   | unsupported | services platform, no VM snapshots                |
 
 `perCommandEnvCwd` is `false` (core wraps); `preservesMemoryOnPause` is `false`; `previewModel` is `subdomain`.

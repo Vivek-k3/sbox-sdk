@@ -64,15 +64,15 @@ const forks = await sandbox.snapshots!.fork(2); // boot 2 from the snapshot
 
 ## Capabilities
 
-| Capability          |    Level    | Notes                               |
-| ------------------- | :---------: | ----------------------------------- |
-| `gpu`               |   native    | `resources.gpu`                     |
-| `snapshot` / `fork` |   native    | `snapshot()` + `createFromSnapshot` |
-| `setTimeout`        |   native    | `updateTtl`                         |
-| `exposePort`        |   native    | public SSL endpoint                 |
-| `filesUpload`       |   native    | via `exec` + base64                 |
-| `streaming`         |  emulated   | buffered process streams            |
-| `list`              | unsupported | not exposed by the SDK              |
-| `pause` / `stop`    | unsupported | `destroy()` = terminate             |
+| Capability          |    Level    | Notes                                          |
+| ------------------- | :---------: | ---------------------------------------------- |
+| `gpu`               |   native    | `resources.gpu`                                |
+| `snapshot` / `fork` |   native    | `snapshot()` + `createFromSnapshot`            |
+| `setTimeout`        |   native    | `updateTtl`                                    |
+| `exposePort`        |   native    | public SSL endpoint                            |
+| `filesUpload`       |   native    | via `exec` + base64                            |
+| `streaming`         |  emulated   | buffered transport; core tails for live output |
+| `list`              | unsupported | not exposed by the SDK                         |
+| `pause` / `stop`    | unsupported | `destroy()` = terminate                        |
 
 `perCommandEnvCwd` is `true`; `previewModel` is `subdomain`. In-place snapshot `restore` reports `NotSupported`.

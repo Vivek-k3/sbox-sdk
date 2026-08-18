@@ -97,6 +97,10 @@ class ExecHandleImpl implements ExecHandle {
   #handle(ev: OutputEvent): void {
     if (ev.type === "exit") {
       this.#exitCode = ev.exitCode;
+      if (ev.synthesized) {
+        this.#synthExit = ev.exitCode;
+        this.#synthesized = true;
+      }
       this.#events.push(ev);
       this.#notify();
       return;

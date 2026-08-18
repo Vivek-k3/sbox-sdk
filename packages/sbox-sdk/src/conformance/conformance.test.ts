@@ -4,12 +4,20 @@ import { createSandboxClient } from "../internal/client.js";
 import { AllProvidersFailedError } from "../internal/errors.js";
 import { memory } from "../memory/index.js";
 import { failing } from "../testing/index.js";
-import { runConformance } from "./index.js";
+import {
+  CHECK_STDERR_SEPARATE,
+  CHECK_STREAM_INCREMENTAL,
+  runConformance,
+} from "./index.js";
+
+/** memory's in-process mini-shell has no `sh`, `sleep`, or `>&2` redirection. */
+const SKIP_SHELL_CHECKS = [CHECK_STREAM_INCREMENTAL, CHECK_STDERR_SEPARATE];
 
 describe("memory provider conformance", () => {
   it("passes with native fs", async () => {
     const report = await runConformance(memory(), {
       expectedCaps: { codeInterpreter: "unsupported", snapshot: "native" },
+      skip: SKIP_SHELL_CHECKS,
     });
     const failed = report.checks.filter((c) => !c.ok);
     expect(JSON.stringify(failed, null, 2)).toBe("[]");
@@ -17,7 +25,9 @@ describe("memory provider conformance", () => {
   });
 
   it("passes with bare fs (exercises exec-based polyfills)", async () => {
-    const report = await runConformance(memory({ bareFs: true }));
+    const report = await runConformance(memory({ bareFs: true }), {
+      skip: SKIP_SHELL_CHECKS,
+    });
     const failed = report.checks.filter((c) => !c.ok);
     expect(JSON.stringify(failed, null, 2)).toBe("[]");
     expect(report.passed).toBe(true);

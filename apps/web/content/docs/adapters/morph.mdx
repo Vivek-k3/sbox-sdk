@@ -59,14 +59,14 @@ Morph is **snapshot-first** — there's no boot-from-image, so `create()` either
 
 ## Capabilities
 
-| Capability          |    Level    | Notes                              |
-| ------------------- | :---------: | ---------------------------------- |
-| `list`              |   native    |                                    |
-| `snapshot` / `fork` |   native    | `instance.snapshot()` / `branch()` |
-| `streaming`         |  emulated   | `instance.exec` is buffered        |
-| `filesUpload`       |   native    | via `exec` + base64                |
-| `exposePort`        |   native    | `exposeHttpService`                |
-| `codeInterpreter`   | unsupported |                                    |
-| `pause` / `stop`    | unsupported | `destroy()` = stop instance        |
+| Capability          |    Level    | Notes                                                |
+| ------------------- | :---------: | ---------------------------------------------------- |
+| `list`              |   native    |                                                      |
+| `snapshot` / `fork` |   native    | `instance.snapshot()` / `branch()`                   |
+| `streaming`         |  emulated   | `instance.exec` buffered; core tails for live output |
+| `filesUpload`       |   native    | via `exec` + base64                                  |
+| `exposePort`        |   native    | `exposeHttpService`                                  |
+| `codeInterpreter`   | unsupported |                                                      |
+| `pause` / `stop`    | unsupported | `destroy()` = stop instance                          |
 
 `perCommandEnvCwd` is `false` (core wraps); `previewModel` is `subdomain`. In-place snapshot `restore` reports `NotSupported`.

@@ -59,15 +59,15 @@ await sandbox.pause(); // suspend — memory preserved
 
 ## Capabilities
 
-| Capability          |    Level    | Notes                         |
-| ------------------- | :---------: | ----------------------------- |
-| `list`              |   native    |                               |
-| `pause`             |   native    | suspend (memory preserved)    |
-| `streaming`         |  emulated   | `executeSync` is buffered     |
-| `filesUpload`       |   native    | binary `uploadFile`           |
-| `exposePort`        |   native    | tunnel via `enableTunnel`     |
-| `snapshot` / `fork` |   native    | `snapshotDisk`; fork = boot N |
-| `codeInterpreter`   | unsupported |                               |
-| `stop`              | unsupported | `pause` (suspend) / `destroy` |
+| Capability          |    Level    | Notes                                              |
+| ------------------- | :---------: | -------------------------------------------------- |
+| `list`              |   native    |                                                    |
+| `pause`             |   native    | suspend (memory preserved)                         |
+| `streaming`         |  emulated   | `executeSync` buffered; core tails for live output |
+| `filesUpload`       |   native    | binary `uploadFile`                                |
+| `exposePort`        |   native    | tunnel via `enableTunnel`                          |
+| `snapshot` / `fork` |   native    | `snapshotDisk`; fork = boot N                      |
+| `codeInterpreter`   | unsupported |                                                    |
+| `stop`              | unsupported | `pause` (suspend) / `destroy`                      |
 
 `perCommandEnvCwd` is `false` (core wraps); `preservesMemoryOnPause` is `true`; `previewModel` is `subdomain`. In-place snapshot `restore` reports `NotSupported`.

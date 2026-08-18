@@ -20,12 +20,19 @@ import {
   parseStatOutput,
   shellQuote,
 } from "./shell.js";
+import {
+  createTailExec,
+  resolveStreaming,
+  shouldTailStream,
+} from "./tail-exec.js";
+import type { ResolvedStreaming, TailProbeState } from "./tail-exec.js";
 import { durationBucket, errorCode } from "./telemetry.js";
 import type { TelemetryEventName, TelemetryReporter } from "./telemetry.js";
 import type {
   CallContext,
   CodeAPI,
   CommandsAPI,
+  DriverExec,
   DriverProcess,
   ExecOptions,
   ExecResult,
@@ -49,8 +56,19 @@ export interface BuildSandboxBase {
   /** Plugins to graft onto every sandbox (applied here so forks inherit them). */
   plugins?: readonly SandboxPlugin[];
   telemetry?: TelemetryReporter;
+  /** Resolved by `createSandboxClient`. */
+  streaming?: ResolvedStreaming;
 }
 
+/**
+ * Builds a sandbox implementation for a provider and driver handle.
+ *
+ * @param provider - The sandbox provider definition and capability metadata
+ * @param handle - The underlying driver handle used to perform sandbox operations
+ * @param base - Shared runtime services and configuration used by the sandbox
+ * @param setup - Context passed to plugin setup hooks
+ * @returns The constructed sandbox
+ */
 export function buildSandbox<Caps extends CapabilityMap, Raw>(
   provider: SandboxProvider<Caps, Raw>,
   handle: import("./types.js").DriverHandle<Raw>,
@@ -59,6 +77,8 @@ export function buildSandbox<Caps extends CapabilityMap, Raw>(
 ): Sandbox<Caps, Raw> {
   const caps = freezeCapabilities(provider.capabilities, provider.flags);
   const { name } = provider;
+  const streaming = base.streaming ?? resolveStreaming(undefined);
+  const tailProbe: TailProbeState = {};
 
   const mkCtx = (signal?: AbortSignal): CallContext => ({
     attempt: 1,
@@ -131,13 +151,50 @@ export function buildSandbox<Caps extends CapabilityMap, Raw>(
       return guard(() => handle.listProcesses!(mkCtx()));
     },
     run(cmd, opts = {}) {
-      const built = buildExecCommand(joinCmd(cmd), opts, provider.flags);
       const createdAt = Date.now();
-      const source = handle.exec(
-        built.command,
-        built.execOptions,
-        mkCtx(opts.signal)
-      );
+      const raw = joinCmd(cmd);
+
+      const plainExec = (): DriverExec => {
+        const built = buildExecCommand(raw, opts, provider.flags);
+        return handle.exec(
+          built.command,
+          built.execOptions,
+          mkCtx(opts.signal)
+        );
+      };
+
+      let source: DriverExec;
+      let parseExitMarker = false;
+      if (
+        shouldTailStream({
+          exitCodeNative: provider.flags.exitCodeNative,
+          mode: streaming.mode,
+          opts,
+          streamingCapability: caps.map.streaming,
+        })
+      ) {
+        source = createTailExec({
+          command: raw,
+          fallbackExec: plainExec,
+          maxChunkBytes: streaming.maxChunkBytes,
+          maxPollMs: streaming.maxPollMs,
+          minPollMs: streaming.minPollMs,
+          opts,
+          probeState: tailProbe,
+          strict: streaming.mode === "tail",
+          tmpDir: streaming.tmpDir,
+          transportExec: (c, o) => handle.exec(c, o, mkCtx(o.signal)),
+        });
+      } else {
+        const built = buildExecCommand(raw, opts, provider.flags);
+        parseExitMarker = built.parseExitMarker;
+        source = handle.exec(
+          built.command,
+          built.execOptions,
+          mkCtx(opts.signal)
+        );
+      }
+
       return createExecHandle(source, {
         mapError: wrapErr,
         onComplete: (outcome) => {
@@ -157,7 +214,7 @@ export function buildSandbox<Caps extends CapabilityMap, Raw>(
         },
         onStderr: opts.onStderr,
         onStdout: opts.onStdout,
-        parseExitMarker: built.parseExitMarker,
+        parseExitMarker,
       });
     },
     async spawn(cmd, opts = {}) {

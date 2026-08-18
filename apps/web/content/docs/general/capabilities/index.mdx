@@ -8,8 +8,10 @@ The unified surface is the common shape every adapter implements, but providers 
 Each provider declares a static `CapabilityMap` — one of three levels per feature:
 
 - `native` — first-class support.
-- `emulated` — supported, but polyfilled by the core (e.g. exec-based filesystem ops).
+- `emulated` — supported, but polyfilled by the core (e.g. exec-based filesystem ops, or [live streaming](/docs/api/commands#streaming-is-a-guarantee-not-a-per-provider-feature) via an in-sandbox tail).
 - `unsupported` — not available; the sub-API is typed `undefined` and throws before any network call.
+
+`emulated` is a statement about _who implements it_, not about whether it works. An `emulated` capability behaves like the real thing; the core just supplies it.
 
 ## Three layers from one table
 
