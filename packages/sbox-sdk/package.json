@@ -178,7 +178,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "prepack": "pnpm run build",
-    "test:live": "vitest run -c vitest.live.config.ts"
+    "test:live": "vitest run -c vitest.live.config.ts",
+    "gen:capabilities": "node scripts/gen-capabilities.mjs"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.69.0",

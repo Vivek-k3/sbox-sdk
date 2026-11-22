@@ -1,0 +1,69 @@
+---
+title: Lifecycle
+description: Idle timeouts, max age, pause/resume, reconnecting after a restart, get-or-create by name, fork and snapshots.
+---
+
+## Lifecycle policy
+
+```ts
+const sandbox = await client.create({
+  lifecycle: {
+    idleTimeoutMs: 10 * 60_000, // suspend after 10 min without activity
+    maxAgeMs: 8 * 3600_000, // hard limit from creation
+    onIdle: "pause", // "pause" | "stop" | "destroy"
+    autoResume: true, // wake on inbound traffic / connect
+  },
+});
+```
+
+Each adapter maps these to its nearest native setting (see its page). `ttlMs` and `onIdle` at the top level still work but are deprecated aliases for `lifecycle.maxAgeMs` / `lifecycle.onIdle`.
+
+## States
+
+`getInfo().state` is fetched live from the provider:
+
+`creating` · `running` · `suspending` · `paused` · `stopped` · `archived` · `destroyed` · `error` · `unknown`
+
+## Pause, stop, resume
+
+```ts
+await sandbox.pause(); // memory kept where flags.preservesMemoryOnPause
+await sandbox.stop(); // disk kept where flags.preservesDiskOnStop
+await sandbox.resume();
+```
+
+`resume()` wakes a paused, stopped or archived sandbox, and requires the `pause` or `stop` capability. On providers with `flags.resumeChangesId` (Together, Morph), resuming produces a **new sandbox id**, so reconnect with the id from `getInfo()`.
+
+## Reconnect after an app restart
+
+```ts
+// persist sandbox.id somewhere, then later:
+const sandbox = await client.connect(savedId, { resume: true });
+```
+
+`{ resume: true }` wakes a paused, stopped or archived sandbox before returning it.
+
+## Get or create by name
+
+```ts
+const desk = await client.getOrCreate({
+  name: "user-42-desktop",
+  template: ref,
+});
+```
+
+This is native on providers with named sandboxes. Elsewhere it's emulated with a `sbox-name` metadata tag and `list()`.
+
+## Fork and snapshots
+
+```ts
+const [clone] = await sandbox.fork(); // gated on `fork`
+const snap = await sandbox.snapshots!.create({
+  name: "after-setup",
+  mode: "memory",
+});
+snap.includesMemory; // true = RAM + processes captured
+const restored = await client.create({ fromSnapshot: snap });
+```
+
+`snapshots.restore(ref)` restores **in place**, and only exists on providers that support it. Booting from a snapshot with `fromSnapshot` is the portable form.

@@ -1,0 +1,33 @@
+---
+title: Terminals (PTY)
+description: Interactive pseudo-terminal sessions with resize, reconnect and exit codes.
+---
+
+```ts
+const term = await sandbox.pty!.create({ cols: 120, rows: 32, cwd: "/app" });
+
+(async () => {
+  for await (const chunk of term) process.stdout.write(chunk); // raw bytes, incl. ANSI
+})();
+
+await term.write("htop\n");
+await term.resize(160, 48);
+const { exitCode } = await term.wait();
+```
+
+- `sandbox.pty` is typed `undefined` on providers without the `pty` capability.
+- `pty.connect(term.id)` reattaches to a running session where the provider supports detachable sessions.
+- `cmd` defaults to the provider's login shell.
+
+Use `commands.run()` for non-interactive commands: it keeps stdout and stderr separate and returns the exit code as data.
+
+## Commands: stdin, timeouts, kill
+
+```ts
+await sandbox.commands.run("python -", { stdin: "print(1 + 1)" }); // works on every provider
+await sandbox.commands.run("make", { timeoutMs: 60_000 }); // rejects with SandboxError("Timeout")
+const h = sandbox.commands.run("npm run dev");
+await h.kill();
+```
+
+`stdin` as a string or bytes is supported everywhere. Where the provider has no native stdin, the core pipes it in through the shell. A `ReadableStream` is buffered first.

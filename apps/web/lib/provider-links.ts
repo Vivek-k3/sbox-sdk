@@ -44,6 +44,13 @@ export const PROVIDER_LINKS: Record<string, ProviderLink[]> = {
     { href: "https://www.daytona.io/docs", label: "Docs" },
     { href: "https://github.com/daytonaio/daytona", label: "GitHub" },
   ],
+  docker: [
+    {
+      href: "https://docs.docker.com/reference/api/engine/",
+      label: "Engine API",
+    },
+    { href: "https://orbstack.dev", label: "OrbStack" },
+  ],
   e2b: [
     { href: "https://e2b.dev", label: "Website" },
     { href: "https://e2b.dev/docs", label: "Docs" },
@@ -53,6 +60,10 @@ export const PROVIDER_LINKS: Record<string, ProviderLink[]> = {
     { href: "https://fly.io", label: "Website" },
     { href: "https://fly.io/docs/machines/", label: "Docs" },
     { href: "https://fly.io/docs/machines/api/", label: "Machines API" },
+  ],
+  freestyle: [
+    { href: "https://www.freestyle.sh", label: "Website" },
+    { href: "https://www.freestyle.sh/docs", label: "Docs" },
   ],
   modal: [
     { href: "https://modal.com", label: "Website" },
@@ -85,6 +96,28 @@ export const PROVIDER_LINKS: Record<string, ProviderLink[]> = {
     { href: "https://www.runloop.ai", label: "Website" },
     { href: "https://docs.runloop.ai", label: "Docs" },
     { href: "https://github.com/runloopai/api-client-ts", label: "GitHub" },
+  ],
+  sprites: [
+    { href: "https://docs.fly.io/sprites/", label: "Docs" },
+    { href: "https://github.com/superfly/sprites-js", label: "GitHub" },
+  ],
+  superserve: [
+    { href: "https://superserve.ai", label: "Website" },
+    { href: "https://docs.superserve.ai", label: "Docs" },
+  ],
+  tensorlake: [
+    { href: "https://tensorlake.ai", label: "Website" },
+    { href: "https://docs.tensorlake.ai", label: "Docs" },
+  ],
+  together: [
+    {
+      href: "https://docs.together.ai/docs/together-code-sandbox",
+      label: "Docs",
+    },
+    {
+      href: "https://github.com/togethercomputer/together-sandbox",
+      label: "GitHub",
+    },
   ],
   vercel: [
     { href: "https://vercel.com", label: "Website" },

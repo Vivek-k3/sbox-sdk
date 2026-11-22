@@ -1,6 +1,6 @@
 # sbox-sdk Renewal Plan (Nov 2026)
 
-**Status:** research complete, plan drafted, nothing implemented yet.
+**Status:** implemented on branch `renewal-0.1.0` (Phases 0–3 plus docs). Remaining: live verification of cloud adapters with real credentials, then release `0.1.0` (`#minor`).
 **Inputs:** four research passes (existing providers ×3, new-provider landscape ×1) run on 2026-11-22 against npm tarballs, `.d.ts`, changelogs and official docs; plus requirements from Borat (BYOK cloud desktop sandboxes).
 **Target release:** `0.1.0` (breaking changes allowed; we are alpha).
 
@@ -270,7 +270,7 @@ Each adapter goes through the same checklist:
 | 6   | Cheap key check                                                                                  | §2.7 `provider.verify()`                                                                  |
 | 7   | Local docker adapter                                                                             | Phase 3 `docker`                                                                          |
 
-Best initial cloud targets for Borat's desktop image are **Daytona and Tensorlake**, pending their adapter reports. **Correction (E2B adapter work, 2026-11-22):** E2B private previews accept the token only in the `e2b-traffic-access-token` header (verified in E2B's proxy source), so a browser WebSocket can't open them. For E2B, Borat needs a public sandbox (treat the URL as a secret) or a small header-adding proxy.
+**Final (after adapter work):** private previews that a browser WebSocket can open (`previewBrowserAuth: true`) are available on **Daytona** (signed preview URLs), **Modal** (connect-token query param), **Superserve** (query token) and **Blaxel** (preview token). All four also build templates from a Dockerfile. Daytona is the best overall fit, with memory pause, snapshots and `shm` sizing. Locally, `docker` covers the same flow and is verified live. **Correction (E2B adapter work, 2026-11-22):** E2B private previews accept the token only in the `e2b-traffic-access-token` header (verified in E2B's proxy source), so a browser WebSocket can't open them. For E2B, Borat needs a public sandbox (treat the URL as a secret) or a small header-adding proxy.
 
 ---
 
