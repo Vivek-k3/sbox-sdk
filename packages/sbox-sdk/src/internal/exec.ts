@@ -310,6 +310,13 @@ class ExecHandleImpl implements ExecHandle {
     await this.#source.kill(signal);
   }
 
+  async closeStdin(): Promise<void> {
+    if (!this.#source.closeStdin) {
+      throw new SandboxError("NotSupported", "closing stdin is not supported");
+    }
+    await this.#source.closeStdin();
+  }
+
   async writeStdin(data: string | Uint8Array): Promise<void> {
     if (!this.#source.writeStdin) {
       throw new SandboxError("NotSupported", "stdin is not supported");
@@ -346,6 +353,16 @@ export function deferredExec(prepare: () => Promise<DriverExec>): DriverExec {
     },
     get pid() {
       return get().then((d) => d.pid);
+    },
+    async closeStdin() {
+      const d = await get();
+      if (!d.closeStdin) {
+        throw new SandboxError(
+          "NotSupported",
+          "closing stdin is not supported"
+        );
+      }
+      await d.closeStdin();
     },
     async writeStdin(data: Uint8Array) {
       const d = await get();

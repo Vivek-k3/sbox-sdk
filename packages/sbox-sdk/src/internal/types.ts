@@ -188,6 +188,11 @@ export interface SandboxSpec {
   /** @deprecated use `lifecycle.onIdle`. */
   onIdle?: "pause" | "stop" | "destroy";
   ports?: number[];
+  /**
+   * Default visibility for previews of this sandbox. Some providers (E2B) set
+   * preview privacy per sandbox at creation, not per port.
+   */
+  previewVisibility?: "public" | "private";
   region?: string;
   volumes?: VolumeMount[];
   secrets?: SecretRef[];
@@ -274,6 +279,8 @@ export interface ExecHandle
   readonly stderr: ReadableStream<Uint8Array>;
   kill(signal?: string): Promise<void>;
   writeStdin(data: string | Uint8Array): Promise<void>;
+  /** Signal EOF on stdin (e.g. so `cat` exits). */
+  closeStdin(): Promise<void>;
 }
 
 export interface Process {
@@ -283,6 +290,7 @@ export interface Process {
   wait(): Promise<ExecResult>;
   kill(signal?: string): Promise<void>;
   writeStdin(data: string | Uint8Array): Promise<void>;
+  closeStdin(): Promise<void>;
 }
 
 export interface ProcessInfo {
@@ -380,7 +388,13 @@ export interface SshCredentials {
   host: string;
   port: number;
   user: string;
+  /** PEM private key. Empty string when the provider uses a token/password. */
   privateKey: string;
+  /** Password or one-time token, for providers that authenticate that way. */
+  password?: string;
+  /** Ready-to-run command, e.g. `ssh token@host -p 2222`. */
+  command?: string;
+  expiresAt?: Date;
 }
 
 export interface KernelContext {
@@ -604,7 +618,10 @@ export interface Sandbox<
   setTimeout(ttlMs: number): Promise<void>;
   stop(): Promise<void>;
   pause(): Promise<void>;
-  /** Check `capabilities.flags.resumeChangesId`: the id may change. */
+  /**
+   * Wake a paused, stopped or archived sandbox (needs `pause` or `stop`).
+   * Check `capabilities.flags.resumeChangesId`: the id may change.
+   */
   resume(): Promise<void>;
   destroy(): Promise<void>;
   /** Clone this sandbox (memory included where supported). Gated on `fork`. */
@@ -722,6 +739,7 @@ export interface DriverExec extends AsyncIterable<OutputEvent> {
   readonly pid: Promise<string>;
   kill(signal?: string): Promise<void>;
   writeStdin?(data: Uint8Array): Promise<void>;
+  closeStdin?(): Promise<void>;
 }
 
 export interface DriverProcess extends DriverExec {

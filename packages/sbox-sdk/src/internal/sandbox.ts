@@ -515,6 +515,12 @@ export function buildSandbox<Caps extends CapabilityMap, Raw>(
     createSsh: () => ssh.create(),
     async setEgressPolicy(policy) {
       assertCapability(name, caps, "egressControl", "network.setEgressPolicy");
+      if (!caps.flags.egressModes.includes(policy.mode)) {
+        throw new NotSupportedError(
+          name,
+          `network.setEgressPolicy({ mode: "${policy.mode}" })`
+        );
+      }
       if (!handle.setEgressPolicy) {
         throw new NotSupportedError(name, "network.setEgressPolicy");
       }
@@ -570,7 +576,10 @@ export function buildSandbox<Caps extends CapabilityMap, Raw>(
     provider: name,
     raw: () => handle.raw,
     async resume() {
-      assertCapability(name, caps, "pause", "resume");
+      // resume() wakes a paused OR stopped/archived sandbox.
+      if (!isCapable(caps, "pause") && !isCapable(caps, "stop")) {
+        throw new NotSupportedError(name, "resume");
+      }
       if (!handle.resume) {
         throw new NotSupportedError(name, "resume");
       }
@@ -755,6 +764,9 @@ function makeProcess(
     wait: () => handle,
     async writeStdin(data) {
       await handle.writeStdin(data);
+    },
+    async closeStdin() {
+      await handle.closeStdin();
     },
   };
 }

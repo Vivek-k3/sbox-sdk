@@ -19,6 +19,12 @@ export interface ShellFs {
 
 export interface ShellIo {
   cwd: string;
+  /**
+   * Shared working directory for one shell (and its pipeline stages). Created
+   * by `run()` and persisted on the caller's io object, so `cd` sticks across
+   * commands and across repeated `run()` calls with the same io (PTY lines).
+   */
+  dir?: { cwd: string };
   env: Record<string, string>;
   stdin: Uint8Array;
   stdout: (data: Uint8Array) => void;
@@ -344,6 +350,7 @@ export class MiniShell {
 
   /** Run a script. Resolves with the exit code; never throws for shell errors. */
   async run(script: string, io: ShellIo): Promise<number> {
+    io.dir ??= { cwd: io.cwd };
     try {
       return await this.#list(parse(lex(script)), io);
     } catch (error) {
@@ -412,7 +419,7 @@ export class MiniShell {
       } else if (r.kind === "err-to-out") {
         io.stderr = io.stdout;
       } else if (r.kind === "file") {
-        const path = resolve(io.cwd, expand(r.target, io.env));
+        const path = resolve(io.dir!.cwd, expand(r.target, io.env));
         if (!r.append) {
           this.#fs.write(path, new Uint8Array());
         }
@@ -421,7 +428,7 @@ export class MiniShell {
           this.#fs.write(path, concat([prev, d]));
         };
       } else {
-        const path = resolve(io.cwd, expand(r.target, io.env));
+        const path = resolve(io.dir!.cwd, expand(r.target, io.env));
         io.stdin = this.#fs.read(path) ?? new Uint8Array();
       }
     }
@@ -460,16 +467,16 @@ export class MiniShell {
         throw new ExitSignal(Number(args[0] ?? io.env["?"] ?? 0) || 0);
       }
       case "pwd": {
-        out(`${io.cwd}\n`);
+        out(`${io.dir!.cwd}\n`);
         return 0;
       }
       case "cd": {
-        const target = resolve(io.cwd, args[0] ?? io.env.HOME ?? "/");
+        const target = resolve(io.dir!.cwd, args[0] ?? io.env.HOME ?? "/");
         if (!fs.isDir(target)) {
           err(`cd: ${args[0]}: No such file or directory\n`);
           return 1;
         }
-        io.cwd = target;
+        io.dir!.cwd = target;
         return 0;
       }
       case "export": {
@@ -517,7 +524,7 @@ export class MiniShell {
           return 0;
         }
         for (const f of operands) {
-          const data = fs.read(resolve(io.cwd, f));
+          const data = fs.read(resolve(io.dir!.cwd, f));
           if (!data) {
             err(`cat: ${f}: No such file or directory\n`);
             return 1;
@@ -528,7 +535,7 @@ export class MiniShell {
       }
       case "base64": {
         const input = operands[0]
-          ? fs.read(resolve(io.cwd, operands[0]))
+          ? fs.read(resolve(io.dir!.cwd, operands[0]))
           : io.stdin;
         if (!input) {
           return 1;
@@ -551,7 +558,7 @@ export class MiniShell {
       }
       case "touch": {
         for (const f of operands) {
-          const p = resolve(io.cwd, f);
+          const p = resolve(io.dir!.cwd, f);
           if (!fs.read(p)) {
             fs.write(p, new Uint8Array());
           }
@@ -560,7 +567,7 @@ export class MiniShell {
       }
       case "ls": {
         const target = operands[0] ?? ".";
-        const entries = fs.list(resolve(io.cwd, target));
+        const entries = fs.list(resolve(io.dir!.cwd, target));
         if (!entries) {
           err(`ls: cannot access '${target}': No such file or directory\n`);
           return 2;
@@ -573,7 +580,7 @@ export class MiniShell {
       }
       case "mkdir": {
         for (const f of operands) {
-          const e = fs.mkdir(resolve(io.cwd, f), flags.includes("p"));
+          const e = fs.mkdir(resolve(io.dir!.cwd, f), flags.includes("p"));
           if (e) {
             err(`${e}\n`);
             return 1;
@@ -584,7 +591,7 @@ export class MiniShell {
       case "rm": {
         for (const f of operands) {
           const e = fs.remove(
-            resolve(io.cwd, f),
+            resolve(io.dir!.cwd, f),
             /[rR]/.test(flags),
             flags.includes("f")
           );
@@ -601,8 +608,8 @@ export class MiniShell {
           return 1;
         }
         const e = fs.rename(
-          resolve(io.cwd, operands[0]!),
-          resolve(io.cwd, operands[1]!)
+          resolve(io.dir!.cwd, operands[0]!),
+          resolve(io.dir!.cwd, operands[1]!)
         );
         if (e) {
           err(`${e}\n`);
@@ -612,7 +619,7 @@ export class MiniShell {
       }
       case "stat": {
         const target = args.at(-1) ?? "";
-        const info = fs.stat(resolve(io.cwd, target));
+        const info = fs.stat(resolve(io.dir!.cwd, target));
         if (!info) {
           err(`stat: cannot statx '${target}': No such file or directory\n`);
           return 1;
@@ -626,9 +633,17 @@ export class MiniShell {
       case "bash": {
         const ci = args.indexOf("-c");
         if (ci === -1) {
-          return this.run(dec.decode(io.stdin), { ...io, env: { ...io.env } });
+          return this.run(dec.decode(io.stdin), {
+            ...io,
+            dir: { cwd: io.dir!.cwd },
+            env: { ...io.env },
+          });
         }
-        return this.run(args[ci + 1] ?? "", { ...io, env: { ...io.env } });
+        return this.run(args[ci + 1] ?? "", {
+          ...io,
+          dir: { cwd: io.dir!.cwd },
+          env: { ...io.env },
+        });
       }
       default: {
         err(`sh: ${cmd}: not found\n`);

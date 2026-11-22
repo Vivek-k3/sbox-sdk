@@ -237,16 +237,69 @@ describe("client v2", () => {
     expect(calls[0]).toContain("sbox_token=");
   });
 
-  it("gates resume on the pause capability", async () => {
+  it("gates resume on the pause or stop capability", async () => {
     const provider = memory();
     const client = createSandboxClient({
       provider: {
         ...provider,
-        capabilities: { ...provider.capabilities, pause: "unsupported" },
+        capabilities: {
+          ...provider.capabilities,
+          pause: "unsupported",
+          stop: "unsupported",
+        },
       } as unknown as typeof provider,
       telemetry: false,
     });
     const sb = await client.create();
     await expect(sb.resume()).rejects.toBeInstanceOf(NotSupportedError);
+  });
+});
+
+describe("provider-level error normalization", () => {
+  it("routes create errors through mapError and retries mapped retryable ones", async () => {
+    const base = memory();
+    let calls = 0;
+    const client = createSandboxClient({
+      provider: {
+        ...base,
+        create: (spec, ctx) => {
+          calls++;
+          if (calls === 1) {
+            throw new Error("rate limited (429)");
+          }
+          return base.create(spec, ctx);
+        },
+        mapError: (e) =>
+          e instanceof Error && e.message.includes("429")
+            ? new SandboxError("QuotaExceeded", e.message, {
+                provider: "memory",
+              })
+            : undefined,
+      },
+      retry: { delayMs: () => 0 },
+      telemetry: false,
+    });
+    await client.create();
+    expect(calls).toBe(2);
+  });
+
+  it("does NOT retry unmapped native create errors (avoids duplicate VMs)", async () => {
+    const base = memory();
+    let calls = 0;
+    const client = createSandboxClient({
+      provider: {
+        ...base,
+        create: () => {
+          calls++;
+          throw new Error("something odd");
+        },
+      },
+      retry: { delayMs: () => 0 },
+      telemetry: false,
+    });
+    const err = await client.create().catch((e: unknown) => e);
+    expect(calls).toBe(1);
+    expect(err).toBeInstanceOf(SandboxError);
+    expect((err as SandboxError).retryable).toBe(false);
   });
 });

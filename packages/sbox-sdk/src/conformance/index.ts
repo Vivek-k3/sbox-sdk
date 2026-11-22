@@ -75,14 +75,14 @@ const CAP_METHODS: Partial<Record<CapabilityName, (keyof DriverHandle)[]>> = {
   fork: ["fork"],
   killProcess: ["killProcess"],
   metrics: ["getMetrics"],
-  pause: ["pause", "resume"],
+  pause: ["pause"],
+  stop: ["stop"],
   proxiedFetch: ["proxyFetch"],
   pty: ["createPty"],
   setTimeout: ["setTimeout"],
   snapshot: ["snapshot"],
   ssh: ["createSsh"],
   statefulKernel: ["createContext"],
-  stop: ["stop"],
 };
 
 /** Provider-level members each capability promises. */
@@ -121,6 +121,20 @@ export function checkCapabilityContract(
         );
       }
     }
+  }
+  // resume() is the way back from BOTH pause and stop.
+  const canSuspend =
+    caps.pause !== "unsupported" || caps.stop !== "unsupported";
+  const hasResume = typeof handle.resume === "function";
+  if (canSuspend && !hasResume) {
+    problems.push(
+      "cap 'pause'/'stop' is declared but handle.resume() is missing"
+    );
+  }
+  if (!canSuspend && hasResume) {
+    problems.push(
+      "handle.resume() exists but caps 'pause' and 'stop' are both unsupported"
+    );
   }
   for (const [cap, members] of Object.entries(CAP_PROVIDER) as [
     CapabilityName,
@@ -579,10 +593,20 @@ export async function runConformance(
 
   if (has("egressControl")) {
     await check("network: set egress policy", async () => {
-      await s.network!.setEgressPolicy({
-        domains: ["example.com"],
-        mode: "allow-list",
-      });
+      const modes = provider.flags.egressModes ?? [
+        "allow-all",
+        "block-all",
+        "allow-list",
+      ];
+      if (modes.includes("allow-list")) {
+        await s.network!.setEgressPolicy({
+          domains: ["example.com"],
+          mode: "allow-list",
+        });
+      }
+      if (modes.includes("block-all")) {
+        await s.network!.setEgressPolicy({ mode: "block-all" });
+      }
       await s.network!.setEgressPolicy({ mode: "allow-all" });
     });
   }

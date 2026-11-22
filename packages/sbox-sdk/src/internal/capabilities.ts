@@ -82,7 +82,14 @@ export interface CapabilityFlags {
   resumeChangesId?: boolean;
   /** Template sources `templates.build()` accepts. Defaults to `[]`. */
   templateSources?: readonly TemplateSourceKind[];
+  /**
+   * Egress modes `setEgressPolicy` accepts when `egressControl` is declared.
+   * Defaults to all three; on/off-only providers (docker) omit "allow-list".
+   */
+  egressModes?: readonly EgressMode[];
 }
+
+export type EgressMode = "allow-all" | "block-all" | "allow-list";
 
 /** Flags with every optional field resolved to its default. */
 export type ResolvedCapabilityFlags = Required<CapabilityFlags>;
@@ -136,6 +143,7 @@ const DEFAULT_FLAGS: ResolvedCapabilityFlags = {
   previewModel: "none",
   resumeChangesId: false,
   templateSources: [],
+  egressModes: ["allow-all", "block-all", "allow-list"],
 };
 
 /** A baseline map of all-`unsupported`, for providers to spread overrides onto. */

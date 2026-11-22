@@ -270,7 +270,7 @@ Each adapter goes through the same checklist:
 | 6   | Cheap key check                                                                                  | §2.7 `provider.verify()`                                                                  |
 | 7   | Local docker adapter                                                                             | Phase 3 `docker`                                                                          |
 
-Best initial cloud targets for Borat's desktop image are **E2B, Daytona and Tensorlake**. All three have a Dockerfile build, browser-usable private previews, and memory pause.
+Best initial cloud targets for Borat's desktop image are **Daytona and Tensorlake**, pending their adapter reports. **Correction (E2B adapter work, 2026-11-22):** E2B private previews accept the token only in the `e2b-traffic-access-token` header (verified in E2B's proxy source), so a browser WebSocket can't open them. For E2B, Borat needs a public sandbox (treat the URL as a secret) or a small header-adding proxy.
 
 ---
 

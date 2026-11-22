@@ -33,11 +33,17 @@ describe("toMastraTools", () => {
 
   it("executes (fs round-trip)", async () => {
     const tools = toMastraTools(await makeSandbox());
-    await tools.sbox_fs_write!.execute!({
-      content: "mastra",
-      path: "/tmp/m.txt",
-    });
-    const out = await tools.sbox_fs_read!.execute!({ path: "/tmp/m.txt" });
+    await tools.sbox_fs_write!.execute!(
+      {
+        content: "mastra",
+        path: "/tmp/m.txt",
+      },
+      {} as never
+    );
+    const out = await tools.sbox_fs_read!.execute!(
+      { path: "/tmp/m.txt" },
+      {} as never
+    );
     expect(out).toBe("mastra");
   });
 
@@ -45,7 +51,10 @@ describe("toMastraTools", () => {
     const tools = toMastraTools(await makeSandbox(), {
       policy: { onApprovalRequest: async () => false },
     });
-    const res = await tools.sbox_fs_remove!.execute!({ path: "/tmp/m.txt" });
+    const res = await tools.sbox_fs_remove!.execute!(
+      { path: "/tmp/m.txt" },
+      {} as never
+    );
     expect(String(res)).toMatch(/Approval denied/i);
   });
 });

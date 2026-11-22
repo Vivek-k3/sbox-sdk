@@ -9,7 +9,7 @@ export default defineConfig({
     typecheck: {
       enabled: true,
       include: ["src/**/*.test-d.ts"],
-      tsconfig: "./tsconfig.json",
+      tsconfig: "./tsconfig.typetest.json",
     },
   },
 });

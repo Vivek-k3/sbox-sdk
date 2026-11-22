@@ -84,6 +84,7 @@ export type {
   PreviewModel,
   ResolvedCapabilityFlags,
   TemplateSourceKind,
+  EgressMode,
 } from "../internal/capabilities.js";
 
 // ---- error taxonomy ----
@@ -121,6 +122,22 @@ export {
   defaultTemplateName,
 } from "../internal/templates.js";
 export type { DockerInstruction } from "../internal/templates.js";
+
+// ---- naming (emulated get-or-create) ----
+export { SBOX_NAME_KEY } from "../internal/constants.js";
+
+// ---- Dockerfile instruction helpers (for step-list template builders) ----
+export {
+  argList,
+  joinPath,
+  parseEnvArgs,
+  resolveCopy,
+  shellForm,
+  splitFlags,
+  splitShellWords,
+  substituteArgs,
+} from "../internal/dockerfile.js";
+export type { ResolvedCopy } from "../internal/dockerfile.js";
 
 // ---- preview helpers ----
 export { normalizePreview, browserUrl } from "../internal/preview.js";

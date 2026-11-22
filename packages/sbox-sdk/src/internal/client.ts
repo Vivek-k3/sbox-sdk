@@ -6,6 +6,7 @@ import { memory } from "../memory/index.js";
  */
 import { freezeCapabilities, isCapable } from "./capabilities.js";
 import type { CapabilityMap } from "./capabilities.js";
+import { SBOX_NAME_KEY } from "./constants.js";
 import {
   AllProvidersFailedError,
   NotSupportedError,
@@ -46,8 +47,7 @@ import type {
   VolumesAPI,
 } from "./types.js";
 
-/** Metadata key used when the core emulates get-or-create by name. */
-export const SBOX_NAME_KEY = "sbox-name";
+export { SBOX_NAME_KEY };
 
 function isTemplateSpec(t: unknown): t is TemplateSpec {
   return typeof t === "object" && t !== null && "source" in t;
@@ -66,7 +66,10 @@ function sleep(ms: number): Promise<void> {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
-export function createSandboxClient(): SandboxClient;
+/** No provider: the in-memory default (optionally with client options). */
+export function createSandboxClient(
+  options?: ClientOptions & { provider?: undefined }
+): SandboxClient;
 export function createSandboxClient<
   Caps extends CapabilityMap,
   Raw,
@@ -124,15 +127,41 @@ export function createSandboxClient(options?: ClientOptions): SandboxClient {
 
   const backoff = (n: number): number => Math.min(100 * 2 ** (n - 1), 2000);
 
+  /**
+   * Normalize a provider-level error through the adapter's `mapError`.
+   * Unmapped native errors become NON-retryable `Provider` errors, so an
+   * unknown failure never triggers a duplicate create.
+   */
+  const normalize = (p: SandboxProvider, error: unknown): SandboxError => {
+    if (error instanceof SandboxError) {
+      return error;
+    }
+    const mapped = p.mapError?.(error);
+    if (mapped) {
+      return mapped;
+    }
+    const wrapped = SandboxError.wrap(error, p.name);
+    if (wrapped.code !== "Provider") {
+      return wrapped; // e.g. AbortError -> Timeout
+    }
+    return new SandboxError(
+      "Provider",
+      error instanceof Error ? error.message : String(error),
+      { cause: error, provider: p.name, retryable: false }
+    );
+  };
+
   const withRetry = async <T>(
-    fn: (attempt: number) => Promise<T>
+    fn: (attempt: number) => Promise<T>,
+    p: SandboxProvider = provider
   ): Promise<T> => {
     const max = retry.retries ?? 2;
     let lastErr: unknown;
     for (let attempt = 1; attempt <= max + 1; attempt++) {
       try {
         return await fn(attempt);
-      } catch (error) {
+      } catch (raw) {
+        const error = normalize(p, raw);
         lastErr = error;
         await hooks?.onError?.(error, attempt);
         const should = (retry.shouldRetry ?? defaultShouldRetry)(
@@ -248,13 +277,15 @@ export function createSandboxClient(options?: ClientOptions): SandboxClient {
       if (!provider.templates?.delete) {
         throw new NotSupportedError(provider.name, "templates.delete");
       }
-      await provider.templates.delete(templateRefId(ref), mkCtx(1));
+      await guardP(() =>
+        provider.templates!.delete!(templateRefId(ref), mkCtx(1))
+      );
     },
     async get(idOrName) {
       if (!provider.templates) {
         throw new NotSupportedError(provider.name, "templates.get");
       }
-      return provider.templates.lookup(idOrName, mkCtx(1));
+      return guardP(() => provider.templates!.lookup(idOrName, mkCtx(1)));
     },
     async *list() {
       if (!provider.templates?.list) {
@@ -264,27 +295,37 @@ export function createSandboxClient(options?: ClientOptions): SandboxClient {
     },
   };
 
+  const guardP = async <T>(fn: () => T | Promise<T>): Promise<T> => {
+    try {
+      return await fn();
+    } catch (error) {
+      throw normalize(provider, error);
+    }
+  };
+
   const volumes: VolumesAPI = {
     async create(spec) {
       if (!provider.volumes) {
         throw new NotSupportedError(provider.name, "volumes.create");
       }
-      return provider.volumes.create(spec, mkCtx(1));
+      return guardP(() => provider.volumes!.create(spec, mkCtx(1)));
     },
     async delete(ref) {
       if (!provider.volumes) {
         throw new NotSupportedError(provider.name, "volumes.delete");
       }
-      await provider.volumes.delete(
-        typeof ref === "string" ? ref : ref.id,
-        mkCtx(1)
+      await guardP(() =>
+        provider.volumes!.delete(
+          typeof ref === "string" ? ref : ref.id,
+          mkCtx(1)
+        )
       );
     },
     async get(idOrName) {
       if (!provider.volumes) {
         throw new NotSupportedError(provider.name, "volumes.get");
       }
-      return provider.volumes.get(idOrName, mkCtx(1));
+      return guardP(() => provider.volumes!.get(idOrName, mkCtx(1)));
     },
     async *list() {
       if (!provider.volumes) {
@@ -424,10 +465,12 @@ export function createSandboxClient(options?: ClientOptions): SandboxClient {
       for (const p of chain) {
         try {
           const resolved = await resolveSpec(p, spec);
-          const handle = await withRetry((attempt) =>
-            Promise.resolve(
-              p.create(resolved, mkCtx(attempt, spec.signal, idem))
-            )
+          const handle = await withRetry(
+            (attempt) =>
+              Promise.resolve(
+                p.create(resolved, mkCtx(attempt, spec.signal, idem))
+              ),
+            p
           );
           await hooks?.afterCreate?.({ id: handle.id, provider: p.name });
           const sandbox = await finishBuild(p, handle, createOptions);
@@ -495,7 +538,7 @@ export function createSandboxClient(options?: ClientOptions): SandboxClient {
         }
       } catch (error) {
         failure = errorCode(error);
-        throw error;
+        throw normalize(provider, error);
       } finally {
         // Emit once on any exit — normal completion, a thrown error, or an
         // early consumer `break`/`return` (which unwinds through here). Early
