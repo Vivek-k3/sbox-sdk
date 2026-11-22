@@ -727,10 +727,13 @@ export const vercel = defineProvider<VercelCaps, VercelSandbox, VercelOptions>(
             const fin = await c.wait();
             // Vercel enforces `timeoutMs` with SIGKILL (exit 137); surface it
             // as a Timeout like every other provider.
+            const slack = timeoutMs
+              ? Math.min(50, Math.floor(timeoutMs / 4))
+              : 0;
             if (
               timeoutMs &&
               fin.exitCode === 137 &&
-              Date.now() - startedAt >= timeoutMs
+              Date.now() - startedAt >= timeoutMs - slack
             ) {
               queue.fail(
                 new SandboxError(

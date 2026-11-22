@@ -550,13 +550,13 @@ export const cloudflare = defineProvider<
       cmd: string,
       o: ExecOptions
     ): Promise<{ processId: string; queue: AsyncQueue<OutputEvent> }> => {
+      const startedAt = Date.now();
       const proc = await s.startProcess(cmd, {
         ...(o.cwd ? { cwd: o.cwd } : {}),
         ...(o.env ? { env: o.env } : {}),
         ...(o.timeoutMs ? { timeout: o.timeoutMs } : {}),
       });
       const queue = new AsyncQueue<OutputEvent>();
-      const startedAt = Date.now();
       void (async () => {
         try {
           const stream = await s.streamProcessLogs(proc.id);
@@ -567,10 +567,13 @@ export const cloudflare = defineProvider<
               }
             } else if (ev.type === "exit") {
               const code = ev.exitCode ?? 0;
+              const slack = o.timeoutMs
+                ? Math.min(50, Math.floor(o.timeoutMs / 4))
+                : 0;
               if (
                 o.timeoutMs &&
                 code !== 0 &&
-                Date.now() - startedAt >= o.timeoutMs
+                Date.now() - startedAt >= o.timeoutMs - slack
               ) {
                 queue.fail(
                   new SandboxError(

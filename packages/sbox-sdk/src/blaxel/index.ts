@@ -819,11 +819,15 @@ export const blaxel = defineProvider<BlaxelCaps, BlaxelRaw, BlaxelOptions>(
           })
           .then((r) => {
             procs.delete(procName);
+            const slack =
+              eopts.timeoutMs === undefined
+                ? 0
+                : Math.min(50, Math.floor(eopts.timeoutMs / 4));
             if (
               !killed.value &&
               eopts.timeoutMs !== undefined &&
               r.status === "killed" &&
-              Date.now() - started >= eopts.timeoutMs
+              Date.now() - started >= eopts.timeoutMs - slack
             ) {
               queue.fail(
                 new SandboxError(

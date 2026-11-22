@@ -1003,12 +1003,15 @@ export const tensorlake = defineProvider(
                 q.push({ data: join(stream, ev.line), type: stream });
               } else if ("exit_code" in ev || "signal" in ev) {
                 exited = true;
+                const slack = execOpts.timeoutMs
+                  ? Math.min(50, Math.floor(execOpts.timeoutMs / 4))
+                  : 0;
                 const timedOut =
                   ev.reason === "timed_out" ||
                   (killedWith === undefined &&
                     typeof ev.signal === "number" &&
                     !!execOpts.timeoutMs &&
-                    Date.now() - started >= execOpts.timeoutMs);
+                    Date.now() - started >= execOpts.timeoutMs - slack);
                 if (timedOut) {
                   q.fail(
                     new SandboxError(
