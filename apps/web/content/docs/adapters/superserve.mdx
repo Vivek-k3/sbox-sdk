@@ -1,0 +1,156 @@
+---
+title: Superserve
+icon: superserve
+description: Firecracker microVMs from Superserve (Apache-2.0 core) through @superserve/sdk. Streamed exec over WebSockets, background processes with stdin, pause/resume with memory, memory+disk snapshots and fork, per-port public or token-auth previews, egress allow/deny lists, stand-in-token secrets, volumes, and Dockerfile/image template builds.
+---
+
+<ProviderLinks provider="superserve" />
+
+## Installation
+
+`@superserve/sdk` (≥ 0.13) is an optional peer dependency of `sbox-sdk`, loaded lazily on first use.
+
+```package-install
+sbox-sdk @superserve/sdk
+```
+
+Exec and spawned processes use the SDK's WebSocket session, which needs a global `WebSocket` (Node 22+, Bun, Deno, browsers).
+
+## Authentication
+
+| Option    | Env var               | Required | Description                                                                                    |
+| --------- | --------------------- | -------- | ---------------------------------------------------------------------------------------------- |
+| `apiKey`  | `SUPERSERVE_API_KEY`  | yes      | Team API key. The SDK reads the env var when you omit the option.                              |
+| `baseUrl` | `SUPERSERVE_BASE_URL` | no       | API URL override. By default the region comes from the key (`ss_live_use_…`, `ss_live_usw_…`). |
+
+`client.verify()` lists one sandbox, so it never creates anything.
+
+## Quickstart
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { superserve } from "sbox-sdk/superserve";
+
+const client = createSandboxClient({
+  provider: superserve({ apiKey: process.env.SUPERSERVE_API_KEY! }),
+});
+
+const sandbox = await client.create({
+  template: "superserve/python-3.11",
+  metadata: { job: "demo" },
+  env: { LOG_LEVEL: "debug" },
+  lifecycle: { idleTimeoutMs: 10 * 60_000 },
+});
+
+for await (const ev of sandbox.commands.run("echo out; echo err >&2")) {
+  console.log(ev); // stdout and stderr arrive separately, then the real exit code
+}
+
+const server = await sandbox.commands.spawn("python3 -m http.server 8000");
+const preview = await sandbox.ports!.expose(8000);
+console.log(preview.url); // https://8000-<id>.sandbox.superserve.ai
+
+await sandbox.pause(); // memory and processes are kept
+await sandbox.resume();
+await sandbox.destroy();
+```
+
+`template` is a Superserve template name or id (`superserve/base`, `superserve/node-22`, or one of yours). `fromSnapshot` takes a snapshot id.
+
+## Options
+
+<AutoTypeTable
+  path="../../packages/sbox-sdk/src/superserve/index.ts"
+  name="SuperserveOptions"
+/>
+
+## Exec
+
+- `commands.run()` and `commands.spawn()` both use `sandbox.commands.spawn()` (WebSocket), not the one-shot `commands.run()` endpoint, which caps commands at 30 s when no timeout is set. Output streams as it is produced, and stdout and stderr stay separate.
+- `cwd`, `env`, `user` and `timeoutMs` are passed natively. A command that reaches its timeout exits `124` inside Superserve; the adapter turns that into a `Timeout` error.
+- `kill()` sends the signal (default `SIGKILL`) to the real process. If the process is still alive after 3 s, the adapter closes the socket, and Superserve stops a session's process when its connection drops.
+- One-shot commands get EOF on stdin immediately. Spawned processes keep stdin open for `process.writeStdin()`.
+- `commands.kill(id)` works for processes spawned through the same handle. Superserve sessions can't be reattached, so `commands.connect()` and `commands.list()` aren't available.
+
+## Templates (Dockerfile and image builds)
+
+`client.templates.build()` calls `Template.create()` in your team and streams the build log through `onEvent`.
+
+```ts
+const tpl = await client.templates.build(
+  {
+    name: "agent-env",
+    source: { dockerfile: await readFile("Dockerfile", "utf8"), context: "./" },
+    env: { NODE_ENV: "production" },
+    resources: { vcpus: 2, memoryMB: 4096, diskMB: 8192 },
+    startCmd: "node server.js",
+    readyCmd: "curl -fs localhost:3000/health",
+  },
+  { onEvent: (e) => e.type === "log" && console.log(e.line) }
+);
+const sandbox = await client.create({ template: tpl });
+```
+
+- A **BuildSpec is a list of steps**, so a Dockerfile is translated: `FROM` → `from`, `RUN` → `run`, `ENV` → `env`, `WORKDIR` → `workdir`, `USER` → `user`, `CMD`/`ENTRYPOINT` → `startCmd`, and `ARG` defaults are substituted. BuildSpec has no copy step, so `COPY`/`ADD` context files are inlined as base64 `run` steps, up to 4 MiB in total. Fetch bigger files in a `RUN`.
+- Not supported: multi-stage builds, `COPY --from`, `RUN --mount` and `ADD <url>`. `EXPOSE`, `LABEL`, `HEALTHCHECK` and similar are ignored, with a log line.
+- `{ image }` sources map to `from`. `registryAuth` and snapshot sources aren't supported (boot a snapshot with `create({ fromSnapshot })`).
+- `startCmd` keeps running in every sandbox, because the template is a memory snapshot. `readyCmd` is polled until it exits 0.
+- The template is named `<name>-<first 12 hex of the cache key>` (`sbox-<key>` without a name), so a rebuild finds it instead of building again.
+- `resources` belong to the template: Superserve sandboxes can't override vCPU, memory or disk at create.
+
+## Previews and browser auth
+
+New sandboxes use Superserve's strict `public` policy, where only published ports are reachable.
+
+- `ports.expose(port)` publishes the port as public: `auth: { type: "public" }`.
+- `ports.expose(port, { visibility: "private" })` publishes it as private and mints a per-port token, returned as `auth: { type: "query", param, token }` with `expiresAt`. The lifetime is `previewTokenTtlSeconds` (default one day). The edge swaps the query token for a secure host cookie on first navigation, so pages, assets and WebSockets opened from that page work in a browser (`flags.previewBrowserAuth: true`). A machine client can send the same token in a header instead, under the header name the SDK's `getPreviewToken()` returns.
+- `ports.unexpose(port)` unpublishes the port and revokes its tokens. Preview ports must be 1024–65535.
+- `spec.ports` are published as public at create.
+
+## Lifecycle
+
+| `SandboxSpec`             | Superserve                                                                         |
+| ------------------------- | ---------------------------------------------------------------------------------- |
+| `lifecycle.maxAgeMs`      | `timeoutSeconds`: auto-pause after that much active time (re-armed on each resume) |
+| `lifecycle.idleTimeoutMs` | `idleTimeoutSeconds` (clamped to 60–604 800)                                       |
+| `onIdle: "destroy"`       | adds `autoDeleteSeconds: 0`: deleted as soon as it pauses (including `pause()`)    |
+| `onIdle: "pause"` / unset | pause (the platform's behavior)                                                    |
+| `setTimeout(ms)`          | `update({ timeoutSeconds })`: an auto-pause window, not a deletion deadline        |
+
+`connect(id)` activates the sandbox, which resumes it if it's paused (Superserve hands out data-plane tokens only for active sandboxes). `getInfo()` fetches live state and maps every status: `starting`/`resuming` → `creating`, `active` → `running`, `pausing` → `suspending`, `paused`/`migrating` → `paused`, `failed` → `error`, `deleted` → `destroyed`. `destroy()` deletes the sandbox.
+
+## Network, secrets and volumes
+
+- **Egress:** `allow-all` clears the rules (`deny.cidrs` become `denyOut`). `block-all` is `denyOut: ["0.0.0.0/0"]`. `allow-list` is `allowOut` (domains and CIDRs) plus deny-all, and when it has domains the adapter also allows the sandbox's DNS resolvers (`1.1.1.1`, `8.8.8.8`) so names resolve. `deny.domains` isn't supported (deny rules take IPs only). Runtime changes need a running sandbox.
+- **Secrets:** a `SecretRef` without a `value` binds an existing Superserve secret to `envVar` (`secrets: { [envVar]: name }`). The sandbox sees a **stand-in token**, and Superserve swaps it for the real credential on HTTPS requests to that secret's hosts. An inline `value` with `mode: "env"` becomes a plain env var.
+- **`EgressPolicy.inject` isn't supported.** Superserve replaces a stand-in token the code sends; it doesn't add headers on its own. Create the secret with `Secret.create({ auth, hosts })` (from `raw()` or the SDK), then bind it by name.
+- **Volumes:** `client.volumes` wraps `Volume` (size in MiB; region comes from the key). `spec.volumes` mounts by id or name, `readOnly` included.
+- **Idempotency:** the create's idempotency key is hashed into metadata. A retried create finds the sandbox from the first attempt instead of making another. `getOrCreate` uses the core's list-by-name.
+
+## Snapshots and fork
+
+`snapshots.create()` captures memory and disk (`includesMemory: true`). Boot one with `client.create({ fromSnapshot })`. `sandbox.fork({ count })` snapshots, creates `count` sandboxes from the snapshot (running processes continue in each), then deletes the intermediate snapshot. Snapshots can't be restored in place, so `snapshots.restore()` isn't available.
+
+## Capabilities
+
+| Capability                                                                |    Level    | Notes                                                        |
+| ------------------------------------------------------------------------- | :---------: | ------------------------------------------------------------ |
+| `list` / `pause` / `setTimeout`                                           |   native    | list filters by metadata and status on the server, paginated |
+| `stop`                                                                    | unsupported | Superserve has pause and delete only                         |
+| `background` / `streaming` / `killProcess` / `stdin`                      |   native    | WebSocket sessions; process ids are scoped to the handle     |
+| `pty`                                                                     | unsupported | not in the TypeScript SDK                                    |
+| `filesUpload`                                                             |   native    | `files.write` accepts a `Blob`                               |
+| `filesWatch`                                                              | unsupported |                                                              |
+| `exposePort` / `privatePreview`                                           |   native    | per-port public or token access; browser-safe                |
+| `egressControl`                                                           |   native    | allow/deny lists; no `inject`                                |
+| `snapshot` / `fork`                                                       |   native    | memory + disk                                                |
+| `volumes` / `templateBuild` / `secretsVault`                              |   native    |                                                              |
+| `codeInterpreter` / `ssh` / `metrics` / `gpu` / `region` / `proxiedFetch` | unsupported | `metrics` exists in the REST API, not the SDK                |
+
+Flags: `preservesMemoryOnPause: true`, `previewModel: "subdomain"`, `previewBrowserAuth: true`, `templateSources: ["image", "dockerfile"]`.
+
+## Known limitations
+
+- `resources` and `region` at create throw `NotSupportedError`: set resources on the template, and choose the region with the API key.
+- Directory listing, `stat`, `mkdir`, `rename` and `remove` go through exec, because the SDK only has file read and write.
+- The desktop API (`sandbox.desktop`), network log (`getNetworkLog()`) and live memory/CPU resizing are available through `sandbox.raw()`.

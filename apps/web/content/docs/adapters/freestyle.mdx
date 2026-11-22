@@ -1,0 +1,172 @@
+---
+title: Freestyle
+icon: freestyle
+description: Full Linux KVM VMs from Freestyle through the freestyle SDK. Exec, reattachable PTY sessions, files readable while paused, pause/resume with memory, memory+disk snapshots and fork, style.dev preview domains, allow-only firewall plus TLS egress with header injection, SSH, and snapshot templates (with an emulated Dockerfile build).
+---
+
+<ProviderLinks provider="freestyle" />
+
+## Installation
+
+`freestyle` (≥ 0.2.20) is an optional peer dependency of `sbox-sdk`, loaded lazily on first use.
+
+```package-install
+sbox-sdk freestyle
+```
+
+<Callout type="info" title="freestyle-sandboxes is deprecated">
+  Freestyle now publishes the `freestyle` package. The old `freestyle-sandboxes`
+  package isn't used by this adapter; uninstall it when you switch.
+</Callout>
+
+## Authentication
+
+| Option    | Env var              | Required | Description                                                          |
+| --------- | -------------------- | -------- | -------------------------------------------------------------------- |
+| `apiKey`  | `FREESTYLE_API_KEY`  | yes      | Account API key. The SDK reads the env var when you omit the option. |
+| `baseUrl` | `FREESTYLE_BASE_URL` | no       | API URL override.                                                    |
+
+`client.verify()` lists one VM, so it never creates anything.
+
+## Quickstart
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { freestyle } from "sbox-sdk/freestyle";
+
+const client = createSandboxClient({
+  provider: freestyle({ apiKey: process.env.FREESTYLE_API_KEY! }),
+});
+
+const sandbox = await client.create({
+  resources: { vcpus: 8, memoryMB: 16_384 }, // picks freestyle/ubuntu-lg
+  env: { NODE_ENV: "development" },
+  network: { mode: "allow-list", domains: ["registry.npmjs.org"] },
+  lifecycle: { idleTimeoutMs: 10 * 60_000 },
+});
+
+const r = await sandbox.commands.run("node -v", { cwd: "/tmp" });
+console.log(r.stdout, r.exitCode);
+
+const term = await sandbox.pty!.create({ cols: 120, rows: 30 });
+await term.write("htop\n");
+const again = await sandbox.pty!.connect(term.id); // reattach from anywhere
+
+const [copy] = await sandbox.fork(); // memory + disk
+await sandbox.pause();
+await sandbox.files.read("/etc/hostname"); // reads work while paused
+await sandbox.destroy();
+```
+
+`template` and `fromSnapshot` both take a snapshot id or slug, including the public bases (`freestyle/ubuntu`, `freestyle/ubuntu-sm` … `freestyle/ubuntu-2xl`, `freestyle/busybox`). Without one, `resources` pick the smallest Ubuntu base that fits (up to 32 vCPU / 64 GiB); otherwise the platform default is used.
+
+## Options
+
+<AutoTypeTable
+  path="../../packages/sbox-sdk/src/freestyle/index.ts"
+  name="FreestyleOptions"
+/>
+
+## Exec
+
+- `vm.exec()` is request/response. Output arrives when the command ends (`streaming: "emulated"`), with stdout and stderr separate and the real exit code.
+- Freestyle has no per-command `cwd`, so the core runs `cd <cwd> && …` for you (`perCommandEnvCwd: false`). Env vars are passed natively.
+- `timeoutMs` is passed natively. Without one, the adapter uses `execTimeoutMs` (default five minutes, the platform cap on VMs without the native agent; Freestyle's own default is 30 s). A timeout throws `Timeout`. For longer work, use a PTY or `nohup … &`.
+- `kill()` works: every command records its shell's pid in `/tmp`, and kill runs a second exec that kills that process tree (`pgrep -P` + `kill -9`).
+- No background processes, live stdin or process ids (`background`, `stdin`, `killProcess` are unsupported). Use a PTY session for long-running or interactive programs.
+
+## Templates (snapshots)
+
+Freestyle templates are snapshots: set a VM up, snapshot it, boot from the snapshot. `client.templates.build()` accepts:
+
+- `{ snapshot }`: boots that snapshot, applies `env`/`workdir`/`startCmd`/`readyCmd`, and snapshots the result.
+- `{ dockerfile }`: an **emulated build**. Freestyle has no image builder, so the adapter boots a base VM and replays the Dockerfile:
+  - `FROM` must name a VM snapshot, not an OCI image: `ubuntu`/`ubuntu:24.04` (sized by `resources`), `busybox`, `freestyle/<base>`, or a snapshot id. Anything else, such as `python:3.12`, throws `NotSupportedError`.
+  - `RUN` runs through exec as root (or the `USER`), in the current `WORKDIR`, with `ENV` applied. Each step is limited to `execTimeoutMs`.
+  - `COPY`/`ADD` write context files through the filesystem API (no size limit; `--chmod` and `--chown` are honored). Multi-stage builds, `--from`, `RUN --mount` and `ADD <url>` aren't supported.
+  - `CMD`/`ENTRYPOINT` (or `startCmd`) start under `nohup` before the snapshot. The snapshot captures memory, so the process is already running in every sandbox. `readyCmd` is polled every 2 s for up to 10 minutes first.
+
+```ts
+const tpl = await client.templates.build(
+  {
+    name: "vite-app",
+    source: {
+      dockerfile: "FROM ubuntu:24.04\nCOPY . /app\nWORKDIR /app\nRUN npm ci\n",
+      context: "./app",
+    },
+    startCmd: "npm run dev -- --host 0.0.0.0",
+    readyCmd: "curl -fs localhost:5173",
+  },
+  { onEvent: (e) => e.type === "log" && console.log(e.step, e.line) }
+);
+const sandbox = await client.create({ template: tpl });
+```
+
+The snapshot's slug is `sbox-<first 16 hex of the cache key>`, so `lookup(cacheKey)` and later builds reuse it. Build logs arrive per step (exec output comes at the end of each step). The build VM is deleted afterwards, even when a step fails.
+
+## Previews
+
+`ports.expose(port)` creates a TLS ingress rule that routes a free `style.dev` name (`https://sbox-<port>-<random>.style.dev`) to the port, with `auth: { type: "public" }`. Pass `previewDomain` to publish under a domain you've verified with Freestyle. `spec.ports` are published at create. `unexpose()` deletes the rule.
+
+Private previews aren't supported: Freestyle gates ingress with forward auth or Freestyle login, not with a per-port token. Put your own auth in front with forward auth through `raw()`.
+
+## Lifecycle
+
+| `SandboxSpec`              | Freestyle                                                                                                       |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `lifecycle.idleTimeoutMs`  | `idleTimeoutSeconds`: pause after that long without network or terminal activity                                |
+| `lifecycle.maxAgeMs`       | `maxRunSeconds` (pause after one run lasts that long), or `ttlSeconds` with `onIdle: "destroy"`                 |
+| `onIdle: "destroy"` + idle | `autoDeleteSeconds: 0`: the VM is ephemeral, deleted whenever it stops running, including an explicit `pause()` |
+| `setTimeout(ms)`           | `update({ ttlSeconds })`: a deletion deadline `ms` from now                                                     |
+
+`getInfo()` maps every state (`starting` → `creating`, `running`, `pausing` → `suspending`, `paused`, `stopped`). `pause()` keeps memory, and `resume()` is `vm.start()`. `destroy()` deletes the VM, its firewall and TLS rules, and any SSH identities this handle created. VMs wake on their own for exec, writes and inbound traffic.
+
+## Network and secrets
+
+Every Freestyle VM states its egress explicitly. The adapter translates `EgressPolicy`:
+
+- `allow-all` (the default): a firewall rule to `{ public: true }`.
+- `block-all`: no egress rules. Mapped domains and SSH still reach the VM.
+- `allow-list`: firewall rules for each CIDR, plus a TLS allow rule for each domain (exact, `*.suffix`, or `*`). The edge checks the SNI, and no public firewall grant is needed.
+- `inject`: a TLS rule per domain whose transform adds the headers at the edge. The secret never enters the VM. `SecretRef` values must be inline (Freestyle has no secret store), and clients in the VM must trust the Freestyle CA the platform installs (`NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt` for Node).
+- `deny` isn't supported: Freestyle rules are allow-only.
+
+`setEgressPolicy()` replaces the egress rules this adapter owns (firewall rules tagged `sbox:egress`, and the VM's TLS egress rules) and leaves your other rules alone. A `SecretRef` without a value throws `NotSupportedError`; one with a value becomes an env var.
+
+Env vars set at create are stored in `/etc/sbox-env.json` inside the VM and passed to every exec and PTY, including after `connect()` and in forks and template builds.
+
+## SSH
+
+`sandbox.ssh!.create()` creates a Freestyle identity scoped to the VM and mints a token. Freestyle SSH puts the token in the username, so the result is `{ host: "beta-ssh.freestyle.sh", port: 22, user: "<vmId>:<token>", privateKey: "" }`: connect with `ssh <user>@<host>`. The identity is deleted when this handle destroys the VM.
+
+## Snapshots and fork
+
+`snapshots.create()` captures memory and disk (`includesMemory: true`), and `client.create({ fromSnapshot })` boots one. `sandbox.fork({ count })` snapshots the VM, creates `count` VMs from it with the same egress policy, metadata and env, then deletes the intermediate snapshot. Injected headers read back as `***`, so a VM you only `connect()`ed to forks without its `inject` rules. There's no in-place restore.
+
+## Capabilities
+
+| Capability                                                                                     |    Level    | Notes                                                       |
+| ---------------------------------------------------------------------------------------------- | :---------: | ----------------------------------------------------------- |
+| `list` / `pause` / `setTimeout`                                                                |   native    | list filters by metadata and state on the server, paginated |
+| `stop`                                                                                         | unsupported | power off from inside the guest                             |
+| `streaming`                                                                                    |  emulated   | exec returns output at the end                              |
+| `background` / `killProcess` / `stdin`                                                         | unsupported | use a PTY                                                   |
+| `pty`                                                                                          |   native    | reattachable sessions with scrollback                       |
+| `filesUpload`                                                                                  |   native    | chunked, resumable, verified by sha256                      |
+| `filesWatch`                                                                                   | unsupported |                                                             |
+| `exposePort`                                                                                   |   native    | `style.dev` or your verified domain                         |
+| `privatePreview`                                                                               | unsupported | forward auth only                                           |
+| `egressControl`                                                                                |   native    | allow-only firewall, TLS domain allows, header injection    |
+| `ssh`                                                                                          |   native    | token in the username, no key pair                          |
+| `snapshot` / `fork`                                                                            |   native    | memory + disk                                               |
+| `templateBuild`                                                                                |   native    | snapshot sources; Dockerfile builds are emulated            |
+| `volumes` / `secretsVault` / `metrics` / `gpu` / `region` / `codeInterpreter` / `proxiedFetch` | unsupported |                                                             |
+
+Flags: `perCommandEnvCwd: false`, `preservesMemoryOnPause: true`, `preservesDiskOnStop: true`, `previewModel: "subdomain"`, `templateSources: ["snapshot", "dockerfile"]`.
+
+## Known limitations
+
+- `volumes`, `region` and GPUs throw `NotSupportedError` at create. `resources.shmMB` is ignored.
+- `resources` with a `template` or `fromSnapshot` grow the VM after boot. Freestyle resizes are grow-only, so smaller requests are ignored.
+- `getOrCreate()` is native: it derives a slug from the name, so a name that isn't slug-safe gets a short hash suffix.
+- `rename` and `watch` aren't native. `files.rename()` goes through exec.

@@ -1,0 +1,78 @@
+---
+title: Tensorlake
+icon: tensorlake
+description: Firecracker / Cloud Hypervisor microVMs with streamed exec, PTYs, memory snapshots, fork, suspend/resume, versioned volumes, egress control and GPUs, over Tensorlake's HTTP API.
+---
+
+<ProviderLinks provider="tensorlake" />
+
+## Installation
+
+The runtime talks to Tensorlake's HTTP API directly, so **no SDK is needed** to create and drive sandboxes. Template builds are the exception: Tensorlake has no HTTP build API, so `client.templates` lazily imports the optional `tensorlake` package.
+
+```package-install
+sbox-sdk
+# only if you build templates:
+tensorlake
+```
+
+## Usage
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { tensorlake } from "sbox-sdk/tensorlake";
+
+const client = createSandboxClient({
+  provider: tensorlake({ apiKey: process.env.TENSORLAKE_API_KEY! }),
+});
+
+const sandbox = await client.create({
+  resources: { vcpus: 2, memoryMB: 4096 },
+  lifecycle: { idleTimeoutMs: 15 * 60_000, onIdle: "pause" },
+});
+
+for await (const ev of sandbox.commands.run("python -c 'print(42)'")) {
+  if (ev.type === "stdout") process.stdout.write(ev.data);
+}
+
+const term = await sandbox.pty!.create({ cols: 120, rows: 32 });
+await term.write("ls -la\n");
+
+const snap = await sandbox.snapshots!.create({ mode: "memory" });
+const [clone] = await sandbox.fork();
+```
+
+| Option           | Env                     | Notes                                                             |
+| ---------------- | ----------------------- | ----------------------------------------------------------------- |
+| `apiKey`         | `TENSORLAKE_API_KEY`    | Required. Project-scoped API key.                                 |
+| `apiUrl`         | `TENSORLAKE_API_URL`    | Optional lifecycle API origin.                                    |
+| `projectId`      | `TENSORLAKE_PROJECT_ID` | Only for `client.volumes`. Read from the volume token if omitted. |
+| `defaultImage`   |                         | Image used when `create()` has no `template`.                     |
+| `readyTimeoutMs` |                         | How long create/resume wait for `running` (default 5 min).        |
+
+## Templates
+
+Dockerfile and image sources are supported. The build runs in your Tensorlake project and is tagged with sbox's content hash, so repeat builds are cache hits.
+
+```ts
+const ref = await client.templates!.build({
+  source: { dockerfile, context: "./desktop" },
+  resources: { vcpus: 2, memoryMB: 4096 },
+});
+const sandbox = await client.create({ template: ref });
+```
+
+## Previews
+
+Ports are served at `https://<port>-<id>.sandbox.tensorlake.ai`. Public ports need no auth. **Private ports require `Authorization: Bearer <api key>`**, so they return `auth: { type: "header" }` and `flags.previewBrowserAuth` is `false`: a browser WebSocket can't open them. To open a port from a browser, expose it publicly (and treat the URL as a secret), or put a proxy in front that adds the header. Never ship the API key to a browser.
+
+## Capabilities
+
+- **Native:** streaming exec, background processes, kill, stdin, PTY, files, previews (public and private), egress control, secrets, memory snapshots, fork, suspend/resume (`pause`), metrics, volumes, GPU, templates.
+- **Unsupported:** `stop` (use `pause`), `setTimeout`, file watch, SSH, region selection, code interpreter, proxied fetch.
+
+## Limitations
+
+- Private previews are header-auth only (see above).
+- `setTimeout` is not supported; set `lifecycle` at create.
+- Template builds need the `tensorlake` package, which ships a native binding. It isn't available on every platform (for example, there's no darwin-x64 build).
