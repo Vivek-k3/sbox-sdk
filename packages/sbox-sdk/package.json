@@ -1,6 +1,6 @@
 {
   "name": "sbox-sdk",
-  "version": "0.0.4",
+  "version": "0.1.0",
   "description": "One unified SDK for agent sandbox providers (E2B, Vercel, Daytona, Modal, Fly Sprites, Tensorlake, Superserve, Freestyle, Docker and more) — swap the adapter import, keep your code.",
   "keywords": [
     "agent",
