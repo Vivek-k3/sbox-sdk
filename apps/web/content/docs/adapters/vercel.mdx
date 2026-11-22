@@ -1,18 +1,24 @@
 ---
 title: Vercel Sandbox
 icon: vercel
-description: Vercel Sandbox via @vercel/sandbox — exec-emulation, native ports, and a filesystem that is auto-snapshotted on stop. No code interpreter.
+description: Named, persistent Firecracker microVMs on Vercel. Streaming exec with real kill, a PTY, snapshots and forks, Drives, egress policy with credential injection, and public port URLs.
 ---
 
 <ProviderLinks provider="vercel" />
 
 ## Installation
 
-`@vercel/sandbox` is an optional peer dependency of `sbox-sdk`, loaded lazily on first use.
+`@vercel/sandbox` is an optional peer dependency of `sbox-sdk`. It's loaded lazily the first time you create or connect. The adapter targets **`@vercel/sandbox` 4.x**, which needs **Node 22.19 or later**.
 
 ```package-install
 sbox-sdk @vercel/sandbox
 ```
+
+## Authentication
+
+<AuthEnv provider="vercel" />
+
+Pass all three of `token`, `teamId` and `projectId`, or none of them. With none, the SDK uses `VERCEL_OIDC_TOKEN`. That token is automatic on Vercel, and locally you can get one with `vercel link && vercel env pull`.
 
 ## Usage
 
@@ -22,22 +28,125 @@ import { vercel } from "sbox-sdk/vercel";
 
 const client = createSandboxClient({
   provider: vercel({
-    token: process.env.VERCEL_TOKEN!,
-    teamId: process.env.VERCEL_TEAM_ID!,
-    projectId: process.env.VERCEL_PROJECT_ID!,
+    token: process.env.VERCEL_TOKEN,
+    teamId: process.env.VERCEL_TEAM_ID,
+    projectId: process.env.VERCEL_PROJECT_ID,
   }),
 });
 
-const sandbox = await client.create({ template: "node22", ports: [3000] });
-const preview = await sandbox.ports.expose(3000);
-console.log(preview.url);
+const sandbox = await client.create({
+  template: "vercel/sandbox/node:24", // a VCR image; omit for vercel/sandbox/universal
+  region: "fra1",
+  resources: { vcpus: 2 },
+  lifecycle: { maxAgeMs: 30 * 60_000 },
+  metadata: { team: "agents" }, // Vercel tags, at most 5
+  ports: [3000],
+});
+
+for await (const ev of sandbox.commands.run("npm install", {
+  cwd: "/vercel/sandbox",
+})) {
+  if (ev.type === "stdout") process.stdout.write(ev.data);
+}
+
+const server = await sandbox.commands.spawn("npm run dev");
+const preview = await sandbox.ports!.expose(3000);
+console.log(preview.url); // https://<subdomain>.vercel.run
+
+await sandbox.destroy(); // deletes the sandbox and its orphan snapshots
 ```
 
-[`template`](/templates) maps to Vercel's `runtime` selector (e.g. `"node22"`), not an arbitrary image. Vercel has no code interpreter, so `sandbox.code` is `undefined`.
+Sandboxes are **named and persistent**. The name is the sandbox `id`, so `client.connect(name)` works across processes. A stopped sandbox keeps its filesystem and resumes on the next command:
 
-## Authentication
+```ts
+await sandbox.stop(); // filesystem auto-snapshotted
+const again = await client.connect(sandbox.id, { resume: true });
 
-<AuthEnv provider="vercel" />
+// Native get-or-create by name:
+const ws = await client.getOrCreate({ name: "workspace-42" });
+```
+
+## Images (templates)
+
+Vercel has **no programmatic build API**. Images come from `docker build` and a push to the [Vercel Container Registry](https://vercel.com/docs/container-registry). So `templateBuild` is **unsupported** and `client.templates` is `undefined`.
+
+`template` maps to the SDK's `image`: a managed image (`vercel/sandbox/universal`, `vercel/sandbox/node:24`, …), a repository in your project (`my-repo:v1`), or a fully qualified VCR URL. The legacy runtime names `node22`, `node24` and `node26` map to the matching managed images. `python3.13` still uses the deprecated `runtime` selector, because no managed image pins 3.13.
+
+## Snapshots and forks
+
+```ts
+const snap = await sandbox.snapshots!.create(); // stops the session; the next call resumes it
+const copy = await client.create({ fromSnapshot: snap }); // source: { type: "snapshot" }
+
+await sandbox.snapshots!.list();
+await sandbox.snapshots!.delete(snap);
+
+const [child] = await sandbox.fork(); // Sandbox.fork({ sourceSandbox }), copies config + disk
+```
+
+Snapshots capture the **disk only** (`includesMemory: false`). Restoring one boots a new sandbox, so in-place `snapshots.restore()` is not available.
+
+## Previews
+
+Port URLs are `https://<subdomain>.vercel.run`. `ports.expose(port)` adds a port the sandbox didn't declare at create time, through `update({ ports })`, and `unexpose()` removes it. A sandbox can expose at most 15 ports.
+
+Vercel's own docs state that exposed ports are reachable through a **public** URL, and there's no private or token-protected mode. So `privatePreview` is unsupported, every preview has `auth: { type: "public" }`, and `previewBrowserAuth` is `false`. Put your own auth in front of anything sensitive.
+
+## Terminals
+
+`sandbox.pty.create()` calls `openInteractive()` and drives the returned WebSocket with the same protocol as the `sandbox exec --interactive` CLI. It uses Node's global `WebSocket`, available in Node 22+.
+
+```ts
+const term = await sandbox.pty!.create({ cols: 120, rows: 40 });
+for await (const chunk of term) process.stdout.write(chunk);
+```
+
+The interactive session can't be reattached, so `pty.connect(id)` is not available.
+
+## Egress and credential injection
+
+`network` (at create) and `sandbox.network.setEgressPolicy()` map onto Vercel's `networkPolicy`:
+
+| sbox                                     | Vercel                                            |
+| ---------------------------------------- | ------------------------------------------------- |
+| `mode: "allow-all"`                      | `"allow-all"`                                     |
+| `mode: "block-all"`                      | `"deny-all"`                                      |
+| `mode: "allow-list"`, `domains`, `cidrs` | `allow: domains`, `subnets.allow`                 |
+| `deny.cidrs`                             | `subnets.deny`                                    |
+| `deny.domains`                           | a proxy `response` rule that answers 403          |
+| `inject: [{ domains, headers }]`         | `transform: [{ headers }]` rules on those domains |
+
+```ts
+await client.create({
+  network: {
+    mode: "allow-list",
+    domains: ["registry.npmjs.org"],
+    inject: [
+      {
+        domains: ["api.github.com"],
+        headers: { Authorization: { name: "gh", value: `Bearer ${token}` } },
+      },
+    ],
+  },
+});
+```
+
+The firewall adds the header, so the secret never enters the sandbox. An injected domain is also allowed. Vercel has no secret vault, so each `SecretRef` needs a `value`, either inline or from a `spec.secrets` entry with the same name.
+
+## Volumes (Drives)
+
+`client.volumes` manages [Drives](https://vercel.com/docs/sandbox/concepts/drives). A volume's `id` is the drive **name**, which is what mounts reference:
+
+```ts
+const data = await client.volumes!.create({
+  name: "datasets",
+  sizeMB: 10_240,
+  region: "iad1",
+});
+await client.create({ volumes: [{ id: data.id, mountPath: "/data" }] });
+```
+
+`readOnly: true` mounts the drive in Vercel's `snapshot` mode, a point-in-time copy. Writes to it never reach the drive.
 
 ## Options
 
@@ -48,14 +157,53 @@ console.log(preview.url);
 
 ## Capabilities
 
-| Capability                               |    Level    | Notes                         |
-| ---------------------------------------- | :---------: | ----------------------------- |
-| `background` / `streaming`               |   native    |                               |
-| `filesUpload`                            |   native    |                               |
-| `exposePort`                             |   native    | preview via declared ports    |
-| `list` / `stop` / `pause` / `setTimeout` | unsupported |                               |
-| `killProcess`                            | unsupported |                               |
-| `codeInterpreter` / `statefulKernel`     | unsupported | `sandbox.code` is `undefined` |
-| `snapshot` / `fork`                      | unsupported |                               |
+| Capability                    |    Level    | Notes                                                          |
+| ----------------------------- | :---------: | -------------------------------------------------------------- |
+| `streaming` / `background`    |   native    | detached `runCommand` + `logs()`, stderr kept separate         |
+| `killProcess`                 |   native    | `Command.kill(signal)`                                         |
+| `stdin`                       |   native    | `spawn()` opens stdin (`writeStdin`); `run()` stdin is closed  |
+| `pty`                         |   native    | `openInteractive()` WebSocket                                  |
+| `list`                        |   native    | `Sandbox.list`, fully paginated                                |
+| `stop`                        |   native    | the filesystem persists (`preservesDiskOnStop`)                |
+| `pause`                       |  emulated   | `stop()` + resume; no memory (`preservesMemoryOnPause: false`) |
+| `setTimeout`                  |   native    | `update({ timeout })`                                          |
+| `snapshot` / `fork`           |   native    | disk only                                                      |
+| `egressControl`               |   native    | incl. `deny` and `inject`                                      |
+| `exposePort`                  |   native    | public `vercel.run` URLs                                       |
+| `volumes`                     |   native    | Drives                                                         |
+| `region`                      |   native    | `spec.region`                                                  |
+| `metrics`                     |   native    | cumulative usage (see below)                                   |
+| `privatePreview`              | unsupported | URLs are public                                                |
+| `templateBuild`               | unsupported | build with Docker, push to VCR                                 |
+| `codeInterpreter` / `ssh`     | unsupported |                                                                |
+| `filesWatch` / `proxiedFetch` | unsupported |                                                                |
+| `gpu` / `secretsVault`        | unsupported |                                                                |
 
-`preservesDiskOnStop` is `true` — `stop()` auto-snapshots the filesystem. `previewModel` is `declaredPorts`.
+`perCommandEnvCwd` is `true`. `timeoutMs` is passed to `runCommand`, and Vercel's SIGKILL on expiry surfaces as a `Timeout` error. `user: "root"` runs with `sudo`, and any other user runs through `asUser()`.
+
+### How the spec maps
+
+| sbox                                      | Vercel                                                         |
+| ----------------------------------------- | -------------------------------------------------------------- |
+| `template`                                | `image`                                                        |
+| `fromSnapshot`                            | `source: { type: "snapshot", snapshotId }`                     |
+| `name` / `idempotencyKey`                 | `name` (`sbox-<key>` when unnamed; a retried create reuses it) |
+| `env`, env-mode `secrets`                 | `env`                                                          |
+| `metadata`                                | `tags` (at most 5)                                             |
+| `resources.vcpus` / `memoryMB`            | `resources.vcpus` (memory is 2048 MB per vCPU, rounded up)     |
+| `region`                                  | `region`                                                       |
+| `lifecycle.maxAgeMs` (or `idleTimeoutMs`) | `timeout` (per session)                                        |
+| `lifecycle.onIdle: "destroy"`             | `persistent: false`                                            |
+| `network`                                 | `networkPolicy`                                                |
+| `volumes`                                 | `mounts`                                                       |
+| `ports`                                   | `ports`                                                        |
+
+`resources.gpu`, `template` together with `fromSnapshot`, and more than 5 tags all throw `Validation`. `diskMB` and `shmMB` are ignored.
+
+## Known limitations
+
+- **No idle timeout.** `timeout` is a wall-clock limit per session, so `idleTimeoutMs` is treated as one. Persistent sandboxes always auto-resume on the next call, so `autoResume` has no effect.
+- **Metrics are cumulative.** `metrics()` reports `memoryTotalMB` and a lifetime-average `cpuPercent` (active CPU ÷ wall time × vCPUs). The raw usage counters are in `raw`. Vercel doesn't expose point-in-time memory or disk usage.
+- **Snapshots stop the session.** The next command resumes it.
+- **`pause()` needs a persistent sandbox.** On a sandbox created with `onIdle: "destroy"`, the filesystem is discarded when the session stops.
+- **`commands.list()` is unavailable.** Vercel has no API to list a session's commands. `commands.connect(id)` and `commands.kill(id)` work by command id.

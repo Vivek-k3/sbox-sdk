@@ -11,8 +11,9 @@ import {
 } from "./capabilities.js";
 import type { CapabilityMap } from "./capabilities.js";
 import { NotSupportedError, SandboxError } from "./errors.js";
-import { createExecHandle } from "./exec.js";
+import { createExecHandle, deferredExec } from "./exec.js";
 import type { PluginSetupContext, SandboxPlugin } from "./plugin.js";
+import { normalizePreview } from "./preview.js";
 import {
   buildExecCommand,
   joinCmd,
@@ -26,7 +27,10 @@ import type {
   CallContext,
   CodeAPI,
   CommandsAPI,
+  DriverExec,
+  DriverHandle,
   DriverProcess,
+  DriverPty,
   ExecOptions,
   ExecResult,
   FileBody,
@@ -35,12 +39,22 @@ import type {
   OutputEvent,
   PortsAPI,
   Process,
+  PtyAPI,
+  PtySession,
   Sandbox,
   SandboxProvider,
   SnapshotRef,
   SnapshotsAPI,
+  SshAPI,
   StoredFile,
 } from "./types.js";
+
+/**
+ * Hidden key exposing the adapter handle on a built sandbox. Used by the
+ * conformance suite to check method presence against declared capabilities.
+ * Not part of the public API.
+ */
+export const DRIVER_HANDLE: unique symbol = Symbol.for("sbox.driverHandle");
 
 export interface BuildSandboxBase {
   fetch: typeof fetch;
@@ -53,7 +67,7 @@ export interface BuildSandboxBase {
 
 export function buildSandbox<Caps extends CapabilityMap, Raw>(
   provider: SandboxProvider<Caps, Raw>,
-  handle: import("./types.js").DriverHandle<Raw>,
+  handle: DriverHandle<Raw>,
   base: BuildSandboxBase,
   setup: PluginSetupContext = {}
 ): Sandbox<Caps, Raw> {
@@ -92,19 +106,55 @@ export function buildSandbox<Caps extends CapabilityMap, Raw>(
     }
   };
 
+  /**
+   * Start an exec through the adapter. Buffered stdin is piped in by the shell
+   * builder; a stdin stream is drained first (deferred start).
+   */
+  const startExec = (
+    command: string,
+    opts: ExecOptions,
+    via: "exec" | "spawn" = "exec"
+  ): { source: DriverExec; parseExitMarker: boolean } => {
+    const launch = (o: ExecOptions) => {
+      const built = buildExecCommand(command, o, provider.flags);
+      return { built, ctx: mkCtx(o.signal) };
+    };
+    if (opts.stdin instanceof ReadableStream) {
+      const stream = opts.stdin;
+      const marker = !provider.flags.exitCodeNative;
+      return {
+        parseExitMarker: marker,
+        source: deferredExec(async () => {
+          const bytes = await drain(stream);
+          const { built, ctx } = launch({ ...opts, stdin: bytes });
+          return via === "spawn"
+            ? await handle.spawn!(built.command, built.execOptions, ctx)
+            : handle.exec(built.command, built.execOptions, ctx);
+        }),
+      };
+    }
+    const { built, ctx } = launch(opts);
+    return {
+      parseExitMarker: built.parseExitMarker,
+      source:
+        via === "spawn"
+          ? deferredExec(async () =>
+              handle.spawn!(built.command, built.execOptions, ctx)
+            )
+          : handle.exec(built.command, built.execOptions, ctx),
+    };
+  };
+
   const runExec = (
     command: string,
     opts: ExecOptions = {}
   ): Promise<ExecResult> => {
-    const built = buildExecCommand(command, opts, provider.flags);
-    const source = handle.exec(
-      built.command,
-      built.execOptions,
-      mkCtx(opts.signal)
-    );
+    const { source, parseExitMarker } = startExec(command, opts);
     return createExecHandle(source, {
       mapError: wrapErr,
-      parseExitMarker: built.parseExitMarker,
+      parseExitMarker,
+      provider: name,
+      timeoutMs: opts.timeoutMs,
     });
   };
 
@@ -131,13 +181,8 @@ export function buildSandbox<Caps extends CapabilityMap, Raw>(
       return guard(() => handle.listProcesses!(mkCtx()));
     },
     run(cmd, opts = {}) {
-      const built = buildExecCommand(joinCmd(cmd), opts, provider.flags);
       const createdAt = Date.now();
-      const source = handle.exec(
-        built.command,
-        built.execOptions,
-        mkCtx(opts.signal)
-      );
+      const { source, parseExitMarker } = startExec(joinCmd(cmd), opts);
       return createExecHandle(source, {
         mapError: wrapErr,
         onComplete: (outcome) => {
@@ -157,18 +202,27 @@ export function buildSandbox<Caps extends CapabilityMap, Raw>(
         },
         onStderr: opts.onStderr,
         onStdout: opts.onStdout,
-        parseExitMarker: built.parseExitMarker,
+        parseExitMarker,
+        provider: name,
+        timeoutMs: opts.timeoutMs,
       });
     },
     async spawn(cmd, opts = {}) {
-      if (handle.spawn) {
-        const proc = await guard(() =>
-          handle.spawn!(joinCmd(cmd), opts, mkCtx(opts.signal))
-        );
-        return makeProcess(proc, wrapErr);
-      }
       assertCapability(name, caps, "background", "commands.spawn");
-      throw new NotSupportedError(name, "commands.spawn");
+      if (!handle.spawn) {
+        throw new NotSupportedError(name, "commands.spawn");
+      }
+      const { source, parseExitMarker } = startExec(
+        joinCmd(cmd),
+        opts,
+        "spawn"
+      );
+      // Resolve the process id up front so `Process.id` is synchronous.
+      const proc = (await guard(async () => {
+        const id = await source.pid;
+        return Object.assign(source, { id });
+      })) as DriverProcess;
+      return makeProcess(proc, wrapErr, parseExitMarker);
     },
   };
 
@@ -176,7 +230,7 @@ export function buildSandbox<Caps extends CapabilityMap, Raw>(
     async download(path) {
       if (handle.download) {
         const stream = await guard(() => handle.download!(path, mkCtx()));
-        return storedFileFromBytes(path, await drain(stream));
+        return storedFileFromStream(path, stream);
       }
       return files.read(path);
     },
@@ -296,6 +350,10 @@ export function buildSandbox<Caps extends CapabilityMap, Raw>(
       };
     },
     async write(path, data) {
+      if (data instanceof ReadableStream && handle.upload) {
+        await guard(() => handle.upload!(path, data, mkCtx()));
+        return;
+      }
       const bytes = await toBytes(data);
       await guard(() => handle.writeFile(path, bytes, mkCtx()));
     },
@@ -324,22 +382,53 @@ export function buildSandbox<Caps extends CapabilityMap, Raw>(
       if (!handle.exposePort) {
         throw new NotSupportedError(name, "ports.expose");
       }
-      return guard(() =>
-        handle.exposePort!(port, { private: opts?.private }, mkCtx())
+      const isPrivate = opts?.visibility === "private" || opts?.private;
+      if (isPrivate) {
+        assertCapability(name, caps, "privatePreview", "ports.expose(private)");
+      }
+      const preview = await guard(() =>
+        handle.exposePort!(port, { private: !!isPrivate }, mkCtx())
       );
+      return normalizePreview(preview);
     },
     async fetch(port, path, init) {
       if (handle.proxyFetch) {
         return guard(() => handle.proxyFetch!(port, path, init, mkCtx()));
       }
-      const preview = await ports.expose(port);
-      return base.fetch(new URL(path ?? "/", preview.url).toString(), init);
+      // Never make a port public as a side effect: reuse an existing preview,
+      // or expose PRIVATELY when the provider supports it.
+      let preview: import("./types.js").Preview | undefined;
+      if (handle.listPorts) {
+        const listed = await ports.list();
+        preview = listed.find((p) => p.port === port);
+      }
+      if (!preview && isCapable(caps, "privatePreview")) {
+        preview = await ports.expose(port, { visibility: "private" });
+      }
+      if (!preview) {
+        throw new NotSupportedError(
+          name,
+          `ports.fetch (port ${port} is not exposed; call ports.expose(${port}) first)`
+        );
+      }
+      const p = normalizePreview(preview);
+      const url = new URL(path ?? "/", p.url);
+      const headers = new Headers(init?.headers);
+      if (p.auth?.type === "header") {
+        for (const [k, v] of Object.entries(p.auth.headers)) {
+          headers.set(k, v);
+        }
+      } else if (p.auth?.type === "query") {
+        url.searchParams.set(p.auth.param, p.auth.token);
+      }
+      return base.fetch(url.toString(), { ...init, headers });
     },
     async list() {
       if (!handle.listPorts) {
         throw new NotSupportedError(name, "ports.list");
       }
-      return guard(() => handle.listPorts!(mkCtx()));
+      const listed = await guard(() => handle.listPorts!(mkCtx()));
+      return listed.map(normalizePreview);
     },
     async unexpose(port) {
       if (!handle.unexposePort) {
@@ -355,7 +444,9 @@ export function buildSandbox<Caps extends CapabilityMap, Raw>(
       if (!handle.snapshot) {
         throw new NotSupportedError(name, "snapshots.create");
       }
-      return guard(() => handle.snapshot!({ name: opts?.name }, mkCtx()));
+      return guard(() =>
+        handle.snapshot!({ mode: opts?.mode, name: opts?.name }, mkCtx())
+      );
     },
     async delete(ref) {
       if (!handle.deleteSnapshot) {
@@ -364,11 +455,7 @@ export function buildSandbox<Caps extends CapabilityMap, Raw>(
       await guard(() => handle.deleteSnapshot!(refId(ref), mkCtx()));
     },
     async fork(count) {
-      if (!handle.fork) {
-        throw new NotSupportedError(name, "snapshots.fork");
-      }
-      const handles = await guard(() => handle.fork!(count ?? 1, mkCtx()));
-      return handles.map((h) => buildSandbox(provider, h, base));
+      return forkImpl(count ?? 1);
     },
     async list() {
       if (!handle.listSnapshots) {
@@ -384,16 +471,56 @@ export function buildSandbox<Caps extends CapabilityMap, Raw>(
     },
   };
 
-  const network: NetworkAPI = {
-    async createSsh() {
-      assertCapability(name, caps, "ssh", "network.createSsh");
+  const forkImpl = async (count: number): Promise<Sandbox<Caps, Raw>[]> => {
+    assertCapability(name, caps, "fork", "fork");
+    if (!handle.fork) {
+      throw new NotSupportedError(name, "fork");
+    }
+    const handles = await guard(() => handle.fork!(count, mkCtx()));
+    return handles.map((h) => buildSandbox(provider, h, base, setup));
+  };
+
+  const ssh: SshAPI = {
+    async create() {
+      assertCapability(name, caps, "ssh", "ssh.create");
       if (!handle.createSsh) {
-        throw new NotSupportedError(name, "network.createSsh");
+        throw new NotSupportedError(name, "ssh.create");
       }
       return guard(() => handle.createSsh!(mkCtx()));
     },
+  };
+
+  const pty: PtyAPI = {
+    async connect(id) {
+      assertCapability(name, caps, "pty", "pty.connect");
+      if (!handle.connectPty) {
+        throw new NotSupportedError(name, "pty.connect");
+      }
+      return makePty(await guard(() => handle.connectPty!(id, mkCtx())));
+    },
+    async create(opts = {}) {
+      assertCapability(name, caps, "pty", "pty.create");
+      if (!handle.createPty) {
+        throw new NotSupportedError(name, "pty.create");
+      }
+      return makePty(
+        await guard(() =>
+          handle.createPty!({ cols: 80, rows: 24, ...opts }, mkCtx())
+        )
+      );
+    },
+  };
+
+  const network: NetworkAPI = {
+    createSsh: () => ssh.create(),
     async setEgressPolicy(policy) {
       assertCapability(name, caps, "egressControl", "network.setEgressPolicy");
+      if (!caps.flags.egressModes.includes(policy.mode)) {
+        throw new NotSupportedError(
+          name,
+          `network.setEgressPolicy({ mode: "${policy.mode}" })`
+        );
+      }
       if (!handle.setEgressPolicy) {
         throw new NotSupportedError(name, "network.setEgressPolicy");
       }
@@ -408,6 +535,16 @@ export function buildSandbox<Caps extends CapabilityMap, Raw>(
     capabilities: caps,
     code: (isCapable(caps, "codeInterpreter") ? code : undefined) as S["code"],
     commands,
+    async fork(opts) {
+      return forkImpl(opts?.count ?? 1);
+    },
+    async metrics() {
+      assertCapability(name, caps, "metrics", "metrics");
+      if (!handle.getMetrics) {
+        throw new NotSupportedError(name, "metrics");
+      }
+      return guard(() => handle.getMetrics!(mkCtx()));
+    },
     destroy: async () => {
       const startedAt = Date.now();
       try {
@@ -435,9 +572,14 @@ export function buildSandbox<Caps extends CapabilityMap, Raw>(
       await guard(() => handle.pause!(mkCtx()));
     },
     ports: (isCapable(caps, "exposePort") ? ports : undefined) as S["ports"],
+    pty: (isCapable(caps, "pty") ? pty : undefined) as S["pty"],
     provider: name,
     raw: () => handle.raw,
     async resume() {
+      // resume() wakes a paused OR stopped/archived sandbox.
+      if (!isCapable(caps, "pause") && !isCapable(caps, "stop")) {
+        throw new NotSupportedError(name, "resume");
+      }
       if (!handle.resume) {
         throw new NotSupportedError(name, "resume");
       }
@@ -453,6 +595,7 @@ export function buildSandbox<Caps extends CapabilityMap, Raw>(
     snapshots: (isCapable(caps, "snapshot")
       ? snapshots
       : undefined) as S["snapshots"],
+    ssh: (isCapable(caps, "ssh") ? ssh : undefined) as S["ssh"],
     async stop() {
       assertCapability(name, caps, "stop", "stop");
       if (!handle.stop) {
@@ -461,6 +604,11 @@ export function buildSandbox<Caps extends CapabilityMap, Raw>(
       await guard(() => handle.stop!(mkCtx()));
     },
   };
+
+  Object.defineProperty(sandbox, DRIVER_HANDLE, {
+    enumerable: false,
+    value: handle,
+  });
 
   // Plugins: graft contributions onto the sandbox (e.g. `sandbox.tools`), and
   // wrap destroy() to run onDestroy hooks first.
@@ -548,11 +696,66 @@ function storedFileFromBytes(path: string, bytes: Uint8Array): StoredFile {
   };
 }
 
+function storedFileFromStream(
+  path: string,
+  stream: ReadableStream<Uint8Array>
+): StoredFile {
+  let buffered: Promise<Uint8Array> | undefined;
+  let streamed = false;
+  const bytes = (): Promise<Uint8Array> => {
+    if (streamed) {
+      return Promise.reject(
+        new SandboxError(
+          "Validation",
+          "file body was already consumed as a stream"
+        )
+      );
+    }
+    buffered ??= drain(stream);
+    return buffered;
+  };
+  return {
+    bytes,
+    path,
+    stream() {
+      if (buffered) {
+        const pending = buffered;
+        return new ReadableStream<Uint8Array>({
+          async start(controller) {
+            controller.enqueue(await pending);
+            controller.close();
+          },
+        });
+      }
+      streamed = true;
+      return stream;
+    },
+    async text() {
+      return new TextDecoder().decode(await bytes());
+    },
+  };
+}
+
+function makePty(d: DriverPty): PtySession {
+  return {
+    [Symbol.asyncIterator]: () => d.output[Symbol.asyncIterator](),
+    id: d.id,
+    kill: () => d.kill(),
+    resize: (cols, rows) => d.resize(cols, rows),
+    async wait() {
+      return { exitCode: await d.wait() };
+    },
+    write: (data) =>
+      d.write(typeof data === "string" ? new TextEncoder().encode(data) : data),
+  };
+}
+
 function makeProcess(
   proc: DriverProcess,
-  mapError: (e: unknown) => SandboxError
+  mapError: (e: unknown) => SandboxError,
+  parseExitMarker = false
 ): Process {
-  const handle = createExecHandle(proc, { mapError });
+  const handle = createExecHandle(proc, { mapError, parseExitMarker });
   return {
     id: proc.id,
     kill: (signal) => proc.kill(signal),
@@ -561,6 +764,9 @@ function makeProcess(
     wait: () => handle,
     async writeStdin(data) {
       await handle.writeStdin(data);
+    },
+    async closeStdin() {
+      await handle.closeStdin();
     },
   };
 }

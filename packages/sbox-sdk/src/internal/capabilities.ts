@@ -37,6 +37,9 @@ export interface CapabilityMap {
   snapshot: CapabilityLevel;
   fork: CapabilityLevel;
   volumes: CapabilityLevel;
+  // build
+  /** Programmatic template/image build in the user's own account. */
+  templateBuild: CapabilityLevel;
   // meta
   gpu: CapabilityLevel;
   region: CapabilityLevel;
@@ -54,6 +57,9 @@ export type PreviewModel =
   | "ip"
   | "none";
 
+/** Where a template can come from (see `TemplateSource`). */
+export type TemplateSourceKind = "dockerfile" | "image" | "snapshot";
+
 /** Behavioral flags that aren't present/absent — they change semantics. */
 export interface CapabilityFlags {
   preservesMemoryOnPause: boolean;
@@ -63,12 +69,35 @@ export interface CapabilityFlags {
   /** false => core synthesizes exit code via `; echo __sbox_rc=$?`. */
   exitCodeNative: boolean;
   previewModel: PreviewModel;
+  /**
+   * true when a PRIVATE preview can be opened from a browser, including a
+   * WebSocket (auth via query-string token or signed URL, not a header).
+   * Defaults to false.
+   */
+  previewBrowserAuth?: boolean;
+  /**
+   * true when resume/restore hands back a NEW sandbox id (Together, Morph).
+   * Callers must re-read `sandbox.id` after `resume()`. Defaults to false.
+   */
+  resumeChangesId?: boolean;
+  /** Template sources `templates.build()` accepts. Defaults to `[]`. */
+  templateSources?: readonly TemplateSourceKind[];
+  /**
+   * Egress modes `setEgressPolicy` accepts when `egressControl` is declared.
+   * Defaults to all three; on/off-only providers (docker) omit "allow-list".
+   */
+  egressModes?: readonly EgressMode[];
 }
+
+export type EgressMode = "allow-all" | "block-all" | "allow-list";
+
+/** Flags with every optional field resolved to its default. */
+export type ResolvedCapabilityFlags = Required<CapabilityFlags>;
 
 /** Runtime read-model surfaced on every sandbox + client. */
 export interface Capabilities {
   readonly map: Readonly<CapabilityMap>;
-  readonly flags: Readonly<CapabilityFlags>;
+  readonly flags: Readonly<ResolvedCapabilityFlags>;
 }
 
 /** Gated sub-API: the real interface when supported/emulated, else `undefined`. */
@@ -98,18 +127,23 @@ const ALL_CAPABILITY_NAMES: readonly CapabilityName[] = [
   "snapshot",
   "fork",
   "volumes",
+  "templateBuild",
   "gpu",
   "region",
   "secretsVault",
   "metrics",
 ];
 
-const DEFAULT_FLAGS: CapabilityFlags = {
+const DEFAULT_FLAGS: ResolvedCapabilityFlags = {
   exitCodeNative: true,
   perCommandEnvCwd: true,
   preservesDiskOnStop: false,
   preservesMemoryOnPause: false,
+  previewBrowserAuth: false,
   previewModel: "none",
+  resumeChangesId: false,
+  templateSources: [],
+  egressModes: ["allow-all", "block-all", "allow-list"],
 };
 
 /** A baseline map of all-`unsupported`, for providers to spread overrides onto. */
@@ -123,8 +157,21 @@ export function baseCapabilities(): CapabilityMap {
 
 export function defaultFlags(
   overrides: Partial<CapabilityFlags> = {}
-): CapabilityFlags {
-  return { ...DEFAULT_FLAGS, ...overrides };
+): ResolvedCapabilityFlags {
+  return resolveFlags(overrides);
+}
+
+/** Fill every optional flag with its default. */
+export function resolveFlags(
+  flags: Partial<CapabilityFlags>
+): ResolvedCapabilityFlags {
+  const out = { ...DEFAULT_FLAGS };
+  for (const [k, v] of Object.entries(flags)) {
+    if (v !== undefined) {
+      (out as Record<string, unknown>)[k] = v;
+    }
+  }
+  return out;
 }
 
 /** Build a frozen runtime read-model from a provider's static declaration. */
@@ -133,7 +180,7 @@ export function freezeCapabilities(
   flags: CapabilityFlags
 ): Capabilities {
   return {
-    flags: Object.freeze({ ...flags }),
+    flags: Object.freeze(resolveFlags(flags)),
     map: Object.freeze({ ...map }),
   };
 }

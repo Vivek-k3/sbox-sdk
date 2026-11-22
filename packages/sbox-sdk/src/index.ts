@@ -15,6 +15,10 @@
 
 export { createSandboxClient } from "./internal/client.js";
 
+export { browserUrl } from "./internal/preview.js";
+export type { BrowserUrlOptions } from "./internal/preview.js";
+export { templateCacheKey } from "./internal/templates.js";
+
 export {
   SandboxError,
   NotSupportedError,
@@ -37,6 +41,8 @@ export type {
   Capabilities,
   Gated,
   PreviewModel,
+  ResolvedCapabilityFlags,
+  TemplateSourceKind,
 } from "./internal/capabilities.js";
 
 export type * from "./internal/types.js";

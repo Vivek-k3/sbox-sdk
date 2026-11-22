@@ -19,6 +19,7 @@ const EXPECTED = [
   "sbox_fs_write",
   "sbox_lifecycle",
   "sbox_snapshot",
+  "sbox_set_egress",
 ];
 
 // FunctionTool helpers (the Tool union only exposes some fields on FunctionTool).

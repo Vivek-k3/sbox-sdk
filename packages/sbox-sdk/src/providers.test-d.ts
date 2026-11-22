@@ -1,97 +1,109 @@
+/**
+ * Type-level proof that each adapter's capability table drives the public
+ * types: gated sub-APIs are the real interface when supported and `undefined`
+ * (a compile error to call) when not. Uses the exported `*_CAPS` consts, so it
+ * needs no credentials and catches accidental capability regressions.
+ */
 import { expectTypeOf } from "vitest";
 
-import { awsLambda } from "./aws-lambda/index.js";
-import { beam } from "./beam/index.js";
-import { blaxel } from "./blaxel/index.js";
-import { cloudflare } from "./cloudflare/index.js";
-import { codesandbox } from "./codesandbox/index.js";
-import { daytona } from "./daytona/index.js";
-import { fly } from "./fly/index.js";
-import { createSandboxClient } from "./index.js";
-import type { CodeAPI, PortsAPI, SnapshotsAPI } from "./internal/types.js";
-import { modal } from "./modal/index.js";
-import { morph } from "./morph/index.js";
-import { northflank } from "./northflank/index.js";
-import { railway } from "./railway/index.js";
-import { runloop } from "./runloop/index.js";
-import { vercel } from "./vercel/index.js";
+import type { AWS_LAMBDA_CAPS } from "./aws-lambda/index.js";
+import type { BEAM_CAPS } from "./beam/index.js";
+import type { BLAXEL_CAPS } from "./blaxel/index.js";
+import type { CLOUDFLARE_CAPS } from "./cloudflare/index.js";
+import type { DAYTONA_CAPS } from "./daytona/index.js";
+import type { DOCKER_CAPS } from "./docker/index.js";
+import type { E2B_CAPS } from "./e2b/index.js";
+import type { FREESTYLE_CAPS } from "./freestyle/index.js";
+import type {
+  CodeAPI,
+  NetworkAPI,
+  PortsAPI,
+  PtyAPI,
+  Sandbox,
+  SandboxClient,
+  SnapshotsAPI,
+  SshAPI,
+  TemplatesAPI,
+  VolumesAPI,
+} from "./internal/types.js";
+import type { MemoryCaps } from "./memory/index.js";
+import type { MODAL_CAPS } from "./modal/index.js";
+import type { RAILWAY_CAPS } from "./railway/index.js";
+import type { SPRITES_CAPS } from "./sprites/index.js";
+import type { SUPERSERVE_CAPS } from "./superserve/index.js";
+import type { TENSORLAKE_CAPS } from "./tensorlake/index.js";
+import type { TOGETHER_CAPS } from "./together/index.js";
+import type { VERCEL_CAPS } from "./vercel/index.js";
 
-// Per-provider proof that capability gating is reflected in the public types.
-export async function _providerTypeChecks(): Promise<void> {
-  const cf = await createSandboxClient({
-    provider: cloudflare({ binding: {} }),
-  }).create();
-  expectTypeOf(cf.code).toEqualTypeOf<CodeAPI>(); // Cloudflare has a code interpreter
-  expectTypeOf(cf.network).toEqualTypeOf<undefined>(); // ...but no egress control
+type SB<C> = C extends import("./internal/capabilities.js").CapabilityMap
+  ? Sandbox<C>
+  : never;
+type Client<C> = C extends import("./internal/capabilities.js").CapabilityMap
+  ? SandboxClient<C>
+  : never;
 
-  const vc = await createSandboxClient({
-    provider: vercel({ projectId: "y", teamId: "x", token: "t" }),
-  }).create();
-  expectTypeOf(vc.code).toEqualTypeOf<undefined>(); // Vercel: no code interpreter (compile error to call)
-  expectTypeOf(vc.ports).toEqualTypeOf<PortsAPI>(); // ...but it exposes ports
+export function _providerTypeChecks(): void {
+  // Borat's targets: templates + PTY + previews
+  expectTypeOf<
+    Client<typeof DOCKER_CAPS>["templates"]
+  >().toEqualTypeOf<TemplatesAPI>();
+  expectTypeOf<SB<typeof DOCKER_CAPS>["pty"]>().toEqualTypeOf<PtyAPI>();
+  expectTypeOf<SB<typeof DOCKER_CAPS>["ssh"]>().toEqualTypeOf<undefined>();
 
-  // Tier-2 ----------------------------------------------------------------
-  const dy = await createSandboxClient({
-    provider: daytona({ apiKey: "k" }),
-  }).create();
-  expectTypeOf(dy.code).toEqualTypeOf<CodeAPI>(); // Daytona has a code interpreter
-  expectTypeOf(dy.snapshots).toEqualTypeOf<undefined>(); // ...snapshots gated off
+  expectTypeOf<
+    Client<typeof E2B_CAPS>["templates"]
+  >().toEqualTypeOf<TemplatesAPI>();
+  expectTypeOf<
+    Client<typeof E2B_CAPS>["volumes"]
+  >().toEqualTypeOf<VolumesAPI>();
+  expectTypeOf<SB<typeof E2B_CAPS>["code"]>().toEqualTypeOf<CodeAPI>();
 
-  const md = await createSandboxClient({ provider: modal({}) }).create();
-  expectTypeOf(md.code).toEqualTypeOf<undefined>(); // Modal: no code interpreter
+  expectTypeOf<
+    Client<typeof DAYTONA_CAPS>["templates"]
+  >().toEqualTypeOf<TemplatesAPI>();
+  expectTypeOf<
+    SB<typeof DAYTONA_CAPS>["snapshots"]
+  >().toEqualTypeOf<SnapshotsAPI>();
+  expectTypeOf<SB<typeof DAYTONA_CAPS>["ssh"]>().toEqualTypeOf<SshAPI>();
 
-  const fl = await createSandboxClient({
-    provider: fly({ apiToken: "t", appName: "a" }),
-  }).create();
-  expectTypeOf(fl.code).toEqualTypeOf<undefined>();
-  expectTypeOf(fl.ports).toEqualTypeOf<PortsAPI>();
+  expectTypeOf<SB<typeof MODAL_CAPS>["code"]>().toEqualTypeOf<undefined>();
+  expectTypeOf<SB<typeof MODAL_CAPS>["network"]>().toEqualTypeOf<NetworkAPI>();
 
-  const aws = await createSandboxClient({
-    provider: awsLambda({ imageIdentifier: "arn" }),
-  }).create();
-  expectTypeOf(aws.code).toEqualTypeOf<undefined>();
-  expectTypeOf(aws.ports).toEqualTypeOf<PortsAPI>();
+  expectTypeOf<
+    Client<typeof TENSORLAKE_CAPS>["templates"]
+  >().toEqualTypeOf<TemplatesAPI>();
+  expectTypeOf<SB<typeof TENSORLAKE_CAPS>["ssh"]>().toEqualTypeOf<undefined>();
 
-  // Tier-3 ----------------------------------------------------------------
-  const nf = await createSandboxClient({
-    provider: northflank({ token: "t", projectId: "p" }),
-  }).create();
-  expectTypeOf(nf.ports).toEqualTypeOf<PortsAPI>(); // public service ports
-  expectTypeOf(nf.snapshots).toEqualTypeOf<undefined>(); // services platform: no snapshots
-  expectTypeOf(nf.code).toEqualTypeOf<undefined>();
+  // Cloud adapters
+  expectTypeOf<SB<typeof VERCEL_CAPS>["code"]>().toEqualTypeOf<undefined>();
+  expectTypeOf<SB<typeof VERCEL_CAPS>["pty"]>().toEqualTypeOf<PtyAPI>();
+  expectTypeOf<
+    Client<typeof VERCEL_CAPS>["templates"]
+  >().toEqualTypeOf<undefined>();
 
-  const rl = await createSandboxClient({
-    provider: runloop({ apiKey: "k" }),
-  }).create();
-  expectTypeOf(rl.snapshots).toEqualTypeOf<SnapshotsAPI>(); // snapshotDisk + fork
-  expectTypeOf(rl.code).toEqualTypeOf<undefined>();
+  expectTypeOf<SB<typeof CLOUDFLARE_CAPS>["code"]>().toEqualTypeOf<CodeAPI>();
+  expectTypeOf<
+    SB<typeof CLOUDFLARE_CAPS>["network"]
+  >().toEqualTypeOf<NetworkAPI>();
 
-  const csb = await createSandboxClient({
-    provider: codesandbox({ apiKey: "k" }),
-  }).create();
-  expectTypeOf(csb.ports).toEqualTypeOf<PortsAPI>();
-  expectTypeOf(csb.code).toEqualTypeOf<undefined>(); // general VM, no kernel API
+  expectTypeOf<
+    SB<typeof BLAXEL_CAPS>["snapshots"]
+  >().toEqualTypeOf<SnapshotsAPI>();
+  expectTypeOf<SB<typeof BEAM_CAPS>["code"]>().toEqualTypeOf<CodeAPI>();
+  expectTypeOf<SB<typeof RAILWAY_CAPS>["ports"]>().toEqualTypeOf<PortsAPI>();
+  expectTypeOf<
+    Client<typeof RAILWAY_CAPS>["templates"]
+  >().toEqualTypeOf<undefined>();
+  expectTypeOf<SB<typeof AWS_LAMBDA_CAPS>["code"]>().toEqualTypeOf<undefined>();
 
-  const mp = await createSandboxClient({
-    provider: morph({ apiKey: "k" }),
-  }).create();
-  expectTypeOf(mp.snapshots).toEqualTypeOf<SnapshotsAPI>(); // snapshot + branch
-  expectTypeOf(mp.network).toEqualTypeOf<undefined>(); // no egress control
+  // New adapters
+  expectTypeOf<SB<typeof FREESTYLE_CAPS>["ssh"]>().toEqualTypeOf<SshAPI>();
+  expectTypeOf<SB<typeof SUPERSERVE_CAPS>["pty"]>().toEqualTypeOf<undefined>();
+  expectTypeOf<SB<typeof SPRITES_CAPS>["pty"]>().toEqualTypeOf<PtyAPI>();
+  expectTypeOf<SB<typeof TOGETHER_CAPS>["ports"]>().toEqualTypeOf<undefined>();
 
-  // Tier-4 ----------------------------------------------------------------
-  const bl = await createSandboxClient({
-    provider: blaxel({ apiKey: "k" }),
-  }).create();
-  expectTypeOf(bl.ports).toEqualTypeOf<PortsAPI>(); // preview URLs
-  expectTypeOf(bl.snapshots).toEqualTypeOf<undefined>();
-
-  const bm = await createSandboxClient({ provider: beam({}) }).create();
-  expectTypeOf(bm.snapshots).toEqualTypeOf<SnapshotsAPI>(); // snapshot + fork
-  expectTypeOf(bm.code).toEqualTypeOf<undefined>();
-
-  const rw = await createSandboxClient({
-    provider: railway({}),
-  }).create();
-  expectTypeOf(rw.snapshots).toEqualTypeOf<SnapshotsAPI>(); // checkpoint + fork
-  expectTypeOf(rw.ports).toEqualTypeOf<undefined>(); // network-isolated, no ports
+  // The in-memory reference implements everything except the code interpreter.
+  expectTypeOf<SB<MemoryCaps>["code"]>().toEqualTypeOf<undefined>();
+  expectTypeOf<SB<MemoryCaps>["pty"]>().toEqualTypeOf<PtyAPI>();
+  expectTypeOf<Client<MemoryCaps>["templates"]>().toEqualTypeOf<TemplatesAPI>();
 }

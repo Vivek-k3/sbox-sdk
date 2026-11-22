@@ -8,9 +8,15 @@
     "emitDeclarationOnly": false,
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ESNext", "DOM"],
+    "lib": ["ESNext", "DOM", "DOM.AsyncIterable"],
     "types": ["node"]
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["dist", "src/**/*.test.ts", "src/**/*.test-d.ts"]
+  "exclude": [
+    "dist",
+    "src/**/*.test.ts",
+    "src/**/*.test-d.ts",
+    "src/live/**",
+    "src/*/live.ts"
+  ]
 }

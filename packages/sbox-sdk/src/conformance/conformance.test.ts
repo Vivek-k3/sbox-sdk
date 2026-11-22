@@ -10,6 +10,14 @@ describe("memory provider conformance", () => {
   it("passes with native fs", async () => {
     const report = await runConformance(memory(), {
       expectedCaps: { codeInterpreter: "unsupported", snapshot: "native" },
+      live: true,
+      template: {
+        source: {
+          context: { "hello.txt": "from template" },
+          dockerfile:
+            "FROM debian:bookworm-slim\nCOPY hello.txt /app/hello.txt\n",
+        },
+      },
     });
     const failed = report.checks.filter((c) => !c.ok);
     expect(JSON.stringify(failed, null, 2)).toBe("[]");
@@ -17,7 +25,9 @@ describe("memory provider conformance", () => {
   });
 
   it("passes with bare fs (exercises exec-based polyfills)", async () => {
-    const report = await runConformance(memory({ bareFs: true }));
+    const report = await runConformance(memory({ bareFs: true }), {
+      live: true,
+    });
     const failed = report.checks.filter((c) => !c.ok);
     expect(JSON.stringify(failed, null, 2)).toBe("[]");
     expect(report.passed).toBe(true);

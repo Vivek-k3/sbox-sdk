@@ -1,31 +1,82 @@
 ---
 title: Templates
-description: The build-time base image for a sandbox. A single opaque string on SandboxSpec, mapped per-adapter to that provider's nearest concept.
+description: Build a reusable base image from a Dockerfile, an image or a snapshot, in your own provider account, cached by content hash.
 ---
 
-`template` is the one field on `SandboxSpec` whose meaning is **deliberately provider-specific** — the build-time base your sandbox boots from.
+A template is the build-time base a sandbox boots from. You can name an existing provider template by id, or have sbox **build one for you** from a Dockerfile, an image, or a snapshot.
 
 ```ts
-const sandbox = await client.create({ template: "python-3.12" });
+// 1. An existing provider template / image / snapshot alias (provider-specific string)
+await client.create({ template: "python-3.12" });
+
+// 2. Build once, reuse everywhere
+const ref = await client.templates!.build(
+  {
+    name: "desktop",
+    source: {
+      dockerfile: await readFile("./desktop/Dockerfile", "utf8"),
+      context: "./desktop",
+    },
+    resources: { vcpus: 2, memoryMB: 4096 },
+    startCmd: "/usr/local/bin/start-desktop",
+  },
+  { onEvent: (e) => console.log(e.type === "log" ? e.line : `[${e.status}]`) }
+);
+const sandbox = await client.create({ template: ref });
+
+// 3. Inline: built on first use, reused by content hash afterwards
+await client.create({
+  template: { source: { dockerfile, context: "./desktop" } },
+  onTemplateEvent: (e) => console.log(e),
+});
 ```
 
-It's an optional, opaque `string`. The core never inspects it — it forwards the spec to the adapter, which maps `template` to that provider's nearest concept.
+## Sources
 
-## How each adapter maps it
+| Source                     | Meaning                                                                                                                                                       |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `{ dockerfile, context? }` | Dockerfile **contents** (not a path). `context` is a local directory (Node) or an in-memory `{ path: body }` map. `.dockerignore` is honored for directories. |
+| `{ image, registryAuth? }` | A registry reference such as `debian:bookworm-slim`.                                                                                                          |
+| `{ snapshot }`             | A provider snapshot id used as the base (providers whose templates _are_ snapshots).                                                                          |
 
-| Adapter        | `template` maps to                                                                                 | If omitted               |
-| -------------- | -------------------------------------------------------------------------------------------------- | ------------------------ |
-| **E2B**        | The E2B template id / alias (e.g. `"python-3.12"`, or a custom-built template)                     | E2B's default base       |
-| **Vercel**     | The `runtime` selector (e.g. `"node22"`) — not an arbitrary image                                  | Vercel's default runtime |
-| **Cloudflare** | **Ignored** — the image is baked into the Worker's container config at deploy time, not per-create | n/a                      |
-| **memory**     | **Ignored** — there are no images in-memory                                                        | n/a                      |
+Each provider accepts a subset of these: check `client.capabilities.flags.templateSources`. Asking for an unsupported source throws `NotSupportedError` before any network call.
 
-## Not portable across providers
+## Caching
 
-Because the value means different things to different providers, a `template` string is **not portable**. `{ template: "python-3.12" }` is valid on E2B, would be the wrong value on Vercel (which wants a runtime id), and is silently ignored on Cloudflare and memory.
+The core computes a **content hash** over the Dockerfile, every context file, the image or snapshot ref, and the `env`/`workdir`/`user`/`startCmd`/`readyCmd`/`resources` fields. The adapter tags the built template with it, so:
 
-This is the one documented break in the swap-one-import promise for `create()` — picking a base image is inherently provider-specific, so the SDK surfaces it honestly rather than pretending a universal catalog exists.
+- a second `build()` or inline `create()` with the same inputs **does not rebuild**. It emits `{ type: "status", status: "cached" }` and returns the existing template.
+- concurrent creates in the same process share one build.
+- `{ force: true }` rebuilds anyway.
+
+`templateCacheKey(spec)` is exported if you want the hash yourself.
+
+## Privacy
+
+Builds run **in your own provider account** (bring-your-own-key). sbox never pushes an image to a public registry. The `docker` adapter tags images locally only.
+
+## Build events
+
+```ts
+type TemplateBuildEvent =
+  | {
+      type: "status";
+      status: "cached" | "queued" | "building" | "ready" | "failed";
+      message?: string;
+    }
+  | { type: "log"; line: string; stream?: "stdout" | "stderr"; step?: string };
+```
+
+## Managing templates
+
+```ts
+await client.templates!.get("desktop"); // TemplateRef | undefined (by id, alias or cache key)
+for await (const t of client.templates!.list()) console.log(t.id);
+await client.templates!.delete(ref);
+```
+
+`client.templates` is typed `undefined` on providers without the `templateBuild` capability.
 
 ## Templates vs snapshots
 
-`template` is the _build-time_ base set once at create. [Snapshots](/api/snapshots) are _runtime_ checkpoints you take and restore on a live sandbox. They're separate surfaces, even where a provider implements them with the same underlying mechanism.
+A template is the _build-time_ base. [Snapshots](/api/snapshots) are _runtime_ checkpoints of a live sandbox. To boot from a snapshot, use `client.create({ fromSnapshot: ref })`.

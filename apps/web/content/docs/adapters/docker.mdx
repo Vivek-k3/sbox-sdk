@@ -1,0 +1,299 @@
+---
+title: Docker
+icon: docker
+description: Local containers through the Docker Engine API, with no npm dependency. Works with OrbStack, Docker Desktop, Colima, Rancher Desktop and Podman. Streaming exec with stdin, a PTY, pause/resume, commit-based snapshots and forks, Dockerfile template builds, volumes and published ports.
+---
+
+<ProviderLinks provider="docker" />
+
+Use the Docker adapter to run the same sandbox code on your laptop that you run in the cloud. Develop against a local container, then switch the import to a cloud adapter. Desktop agents can also keep a local runtime and a cloud runtime behind one interface.
+
+## Installation
+
+The adapter has **no dependencies**. It speaks the [Docker Engine API](https://docs.docker.com/reference/api/engine/) over the daemon's unix socket with `node:http`, which it loads lazily on first use. It needs Node (or Bun or Deno with Node compatibility) and a running container runtime.
+
+```package-install
+sbox-sdk
+```
+
+### Supported runtimes
+
+| Runtime                | Socket the adapter finds                                                                      |
+| ---------------------- | --------------------------------------------------------------------------------------------- |
+| OrbStack               | `~/.orbstack/run/docker.sock`                                                                 |
+| Docker Engine (Linux)  | `/var/run/docker.sock`                                                                        |
+| Docker Desktop         | `~/.docker/run/docker.sock` (or `/var/run/docker.sock`)                                       |
+| Colima                 | `~/.colima/default/docker.sock`                                                               |
+| Rancher Desktop (moby) | `~/.rd/docker.sock`                                                                           |
+| Podman (compat API)    | `$XDG_RUNTIME_DIR/podman/podman.sock`, `~/.local/share/containers/podman/machine/podman.sock` |
+
+Only OrbStack is tested live. The other runtimes serve the same Engine API, but run the [conformance suite](/capabilities) once on yours, especially on Podman, whose Docker-compatible API isn't a perfect copy.
+
+## Connecting to the daemon
+
+No credentials are needed. The adapter picks an endpoint in this order:
+
+1. The `socketPath` or `host` option.
+2. `DOCKER_HOST`: `unix:///path/to.sock` or `tcp://host:2375`. With `DOCKER_TLS_VERIFY=1`, it connects over TLS on port 2376 using `ca.pem`, `cert.pem` and `key.pem` from `DOCKER_CERT_PATH`.
+3. The first socket in the table above that exists. Symlinks are resolved, so a `/var/run/docker.sock` that points at OrbStack is reported as OrbStack.
+
+| Option       | Env var             | Description                                        |
+| ------------ | ------------------- | -------------------------------------------------- |
+| `socketPath` |                     | Unix socket path. Overrides everything else.       |
+| `host`       | `DOCKER_HOST`       | `unix://…` or `tcp://…`. `ssh://` isn't supported. |
+|              | `DOCKER_TLS_VERIFY` | Use TLS for `tcp://`.                              |
+|              | `DOCKER_CERT_PATH`  | Directory that holds the client certificates.      |
+
+`client.verify()` calls `GET /_ping` and `GET /version`. It never creates anything, and it reports the runtime and engine, for example `OrbStack (Docker Engine - Community 29.8.2, API 1.56)`.
+
+## Usage
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { docker } from "sbox-sdk/docker";
+
+const client = createSandboxClient({ provider: docker() });
+
+const sandbox = await client.create({
+  // Any image. The default is debian:bookworm-slim, pulled if missing.
+  template: "node:22-slim",
+  env: { NODE_ENV: "development" },
+  metadata: { project: "demo" },
+  resources: { vcpus: 2, memoryMB: 2048 },
+  ports: [3000], // published at create, on 127.0.0.1:<random>
+});
+
+for await (const ev of sandbox.commands.run("node -e 'console.log(1+1)'")) {
+  if (ev.type === "stdout") process.stdout.write(ev.data);
+}
+
+await sandbox.files.write(
+  "/app/index.js",
+  "require('http').createServer((q, s) => s.end('hi')).listen(3000)"
+);
+await sandbox.commands.spawn("node /app/index.js");
+const preview = await sandbox.ports!.expose(3000);
+console.log(preview.url); // http://127.0.0.1:55012
+
+await sandbox.destroy(); // DELETE /containers/{id}?force=1&v=1
+```
+
+Every container is created with `Init: true`, so tini reaps zombies and forwards signals. It runs `sleep infinity` as a keep-alive unless the template sets a `startCmd`, or you pass `command: "image"` to run the image's own `CMD`. Containers carry the labels `sbox.managed=true`, `sbox.name`, `sbox.idempotency` and `sbox.meta.<key>` (from `metadata`). `list()` and `getOrCreate()` filter on these labels.
+
+## Example: a desktop sandbox
+
+This is the setup for an agent app that drives a Linux desktop (Debian, Chromium, a VNC server and an HTTP control server). It runs locally on Docker and in the cloud on another adapter, with the same spec.
+
+```ts
+import { readFile } from "node:fs/promises";
+import { createSandboxClient } from "sbox-sdk";
+import { docker } from "sbox-sdk/docker";
+
+const client = createSandboxClient({ provider: docker() });
+
+const desktop = await client.templates!.build(
+  {
+    name: "agent-desktop", // tagged sbox/agent-desktop:latest
+    source: {
+      context: "./desktop-image", // Dockerfile build context directory
+      dockerfile: await readFile("./desktop-image/Dockerfile", "utf-8"),
+    },
+    env: { DISPLAY: ":1" },
+    startCmd: "/opt/desktop/start.sh", // runs as the container's main process
+    readyCmd: "curl -sf http://127.0.0.1:7000/health", // create() waits for it
+    resources: { shmMB: 1024, memoryMB: 4096, vcpus: 2 }, // template defaults
+  },
+  { onEvent: (e) => e.type === "log" && console.log(e.line) }
+);
+
+const sandbox = await client.create({
+  template: desktop,
+  ports: [6080, 7000], // noVNC + control server
+  volumes: [{ id: "agent-home", mountPath: "/home/agent" }],
+  metadata: { app: "agent" },
+});
+
+const vnc = await sandbox.ports!.expose(6080);
+const control = await sandbox.ports!.expose(7000);
+// vnc.url  -> http://127.0.0.1:<port>   (vnc.wsUrl -> ws://127.0.0.1:<port>)
+const res = await sandbox.ports!.fetch(7000, "/screenshot");
+```
+
+- **`resources.shmMB` sets `HostConfig.ShmSize`.** Docker's default `/dev/shm` is 64 MB, and Chromium crashes with it. Give it 1024 MB or more.
+- **Ports must be declared at create.** Docker can't publish a port on a running container, so `ports.expose(port)` throws a `Validation` error for an undeclared port.
+- **The rebuild is skipped when nothing changed.** The image is labelled `sbox.cacheKey=<content hash>`, and a second `build()` with the same Dockerfile, context and options finds it again.
+
+## Templates
+
+`client.templates.build()` calls `POST /build` with a tar of the context plus the Dockerfile. It streams every progress line to `onEvent` and tags the result `sbox/<name>:latest`, with the labels `sbox.cacheKey`, `sbox.template` and `sbox.startCmd` / `sbox.readyCmd` / `sbox.resources`. The template's `env`, `workdir` and `user` are appended to the Dockerfile as `ENV` / `WORKDIR` / `USER`, so they are baked into the image.
+
+| Source           | What happens                                                                                    |
+| ---------------- | ----------------------------------------------------------------------------------------------- |
+| `{ dockerfile }` | builds with your context (a directory path or in-memory files)                                  |
+| `{ image }`      | pulls it (`registryAuth` is sent as `X-Registry-Auth`), then builds `FROM` it to add the labels |
+| `{ snapshot }`   | builds `FROM` a snapshot image                                                                  |
+
+`templates.get(idOrKey)` finds an image by cache key, by template name (`sbox/<name>:latest`) or by any image reference. Images are only ever built and tagged locally. The adapter **never pushes** to a registry.
+
+`template` at create time can also be any plain image reference, for example `"python:3.12-slim"`. It's pulled if it's missing, and the `onPull` option receives the progress.
+
+## Exec, stdin and processes
+
+`commands.run()` creates an exec and hijacks the HTTP connection from `exec/start`. It demultiplexes Docker's 8-byte-header stream, so stdout and stderr stream separately and in real time. The exit code comes from `GET /exec/{id}/json`. `cwd`, `env` and `user` are passed natively, and `timeoutMs` kills the command and rejects with `Timeout`.
+
+`kill(signal)` sends the signal to the command and every process it started. Docker reports exec pids in the daemon's pid namespace, so each command first prints its own in-container pid on a private marker, which the adapter strips from the output. The kill itself runs in a second exec. The default signal is `KILL`.
+
+stdin is attached through the hijacked socket:
+
+```ts
+const h = sandbox.commands.run("python3 -i");
+await h.writeStdin("print(6 * 7)\n");
+await h.writeStdin(new Uint8Array()); // a zero-length write sends EOF
+const { stdout } = await h;
+```
+
+- **`run()`** closes stdin right after start, unless you call `writeStdin()` before the process starts. A command that reads stdin, such as `apt-get` prompts, therefore sees EOF instead of hanging.
+- **`spawn()`** keeps stdin open for later writes. End it with a zero-length write.
+
+`commands.list()` reads `/proc`. `commands.connect(pid)` works for processes this client spawned, because Docker can't re-attach to another client's exec.
+
+## Files
+
+| Call                                | Engine API                                                                                             |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `write`/`upload`                    | `PUT /containers/{id}/archive?path=<dir>` with a one-file tar. Missing parent directories are created. |
+| `read`/`download`                   | `GET /containers/{id}/archive?path=…`, unpacked by a built-in tar reader. Symlinks are followed.       |
+| `stat`/`exists`                     | `HEAD /containers/{id}/archive`, which returns the `X-Docker-Container-Path-Stat` header               |
+| `list`, `mkdir`, `remove`, `rename` | exec (`ls`, `mkdir`, `rm`, `mv`)                                                                       |
+
+Binary files of any size round-trip. Files are written with the container user's ownership (`copyUIDGID`).
+
+## PTY
+
+`sandbox.pty.create()` creates an exec with `Tty: true` and an initial `ConsoleSize`. It runs `bash -l` (or `sh -l`) unless you pass `cmd`. `resize()` calls `POST /exec/{id}/resize`, and `wait()` returns the shell's exit code.
+
+```ts
+const term = await sandbox.pty!.create({ cols: 120, rows: 40 });
+for await (const chunk of term) process.stdout.write(chunk);
+```
+
+## Lifecycle
+
+| Method         | Engine API                                   | Notes                               |
+| -------------- | -------------------------------------------- | ----------------------------------- |
+| `pause()`      | `POST /containers/{id}/pause`                | cgroup freezer; **memory is kept**  |
+| `stop()`       | `POST /containers/{id}/stop`                 | processes end; **the disk is kept** |
+| `resume()`     | `unpause` or `start`, depending on state     | waits for the template's `readyCmd` |
+| `setTimeout()` | an exec that stops the container after `ttl` | calling it again re-arms the timer  |
+| `destroy()`    | `DELETE /containers/{id}?force=1&v=1`        | also removes anonymous volumes      |
+
+`getInfo()` inspects the container each time and maps `State.Status` like this: `running`→`running`, `paused`→`paused`, `created`/`exited`→`stopped`, `restarting`→`creating`, `removing`→`destroyed`, `dead`→`error`.
+
+`idempotencyKey` becomes the label `sbox.idempotency` and a deterministic container name. A create with the same key returns the existing container, even when two creates race. `getOrCreate({ name })` looks the name up in the `sbox.name` label and resumes the container if it's stopped or paused.
+
+## Snapshots and forks
+
+```ts
+const snap = await sandbox.snapshots!.create({ name: "after-setup" });
+// snap.id === "sbox-snapshot/<container id prefix>:after-setup"
+
+const copy = await client.create({ fromSnapshot: snap });
+const [a, b] = await sandbox.fork({ count: 2 });
+
+await sandbox.snapshots!.list(); // images labelled with this container's id
+await sandbox.snapshots!.delete(snap);
+```
+
+A snapshot is `POST /commit`, which writes a local image. It captures the **filesystem only** (`includesMemory: false`), and `snapshots.create({ mode: "memory" })` throws `Validation`. Use `pause()` when you need to keep memory. `fork(count)` commits once and starts `count` containers with the parent's resources, ports (new host ports), mounts and metadata. The fork image is removed when the last child is destroyed. Snapshot images keep the image's original `ENV`, so secrets passed as env aren't baked into them.
+
+## Ports and previews
+
+`previewModel` is `"ip"`. Declared ports are bound to `127.0.0.1` on a random host port. Set `bindIp` to change that, but think twice before exposing a sandbox to your LAN. `ports.expose(port)` and `ports.list()` return `{ url: "http://127.0.0.1:<hostPort>", wsUrl: "ws://…", auth: { type: "public" } }`.
+
+`ports.fetch(port, path)` goes through the published port. For a port that wasn't declared, it falls back to the container's IP address. That works on Linux and OrbStack, but not on Docker Desktop.
+
+There are no private previews: anything on localhost can reach a published port.
+
+## Egress
+
+| Policy                         | What the adapter does                                      |
+| ------------------------------ | ---------------------------------------------------------- |
+| `block-all` at create          | `HostConfig.NetworkMode: "none"`                           |
+| `block-all` later              | disconnects the container from every network               |
+| `allow-all`                    | connects the `network` option's network (default `bridge`) |
+| `allow-list`, `deny`, `inject` | throws `Validation`                                        |
+
+Docker only has network **on or off**. It can't filter by domain or CIDR, and it can't inject credentials. Run an egress proxy you control if you need an allow-list. While the network is blocked, declared ports aren't published. `allow-all` publishes them again, possibly on new host ports, so call `ports.expose()` again afterwards.
+
+## Volumes
+
+`client.volumes` maps to `/volumes`. A volume's `id` is its name, and mounts use it. An absolute host path in `volumes[].id` becomes a bind mount.
+
+```ts
+await client.volumes!.create({ name: "agent-home" });
+await client.create({
+  volumes: [{ id: "agent-home", mountPath: "/home/agent" }],
+});
+await client.create({
+  volumes: [{ id: "/Users/me/project", mountPath: "/work", readOnly: true }],
+});
+```
+
+`volumes.list()` only shows volumes the adapter created (label `sbox.managed=true`). `sizeMB` is recorded as a label, but the `local` driver doesn't enforce it.
+
+## Metrics
+
+`sandbox.metrics()` reads `GET /containers/{id}/stats?stream=false`. `cpuPercent` uses the `docker stats` formula, where 100% equals one full core. `memoryUsedMB` excludes the page cache, and `memoryTotalMB` is the limit. The call takes about a second, because the daemon samples twice.
+
+## Options
+
+<AutoTypeTable
+  path="../../packages/sbox-sdk/src/docker/index.ts"
+  name="DockerOptions"
+/>
+
+## Capabilities
+
+| Capability                                 |    Level    | Notes                                                 |
+| ------------------------------------------ | :---------: | ----------------------------------------------------- |
+| `list` / `stop` / `pause` / `setTimeout`   |   native    | `preservesMemoryOnPause` and `preservesDiskOnStop`    |
+| `streaming` / `background` / `killProcess` |   native    | hijacked exec, demultiplexed; kills the process tree  |
+| `stdin`                                    |   native    | zero-length `writeStdin` sends EOF                    |
+| `pty`                                      |   native    | `Tty: true` exec + resize                             |
+| `filesUpload`                              |   native    | tar over `/archive`                                   |
+| `exposePort`                               |   native    | ports declared at create, on `127.0.0.1`              |
+| `proxiedFetch`                             |   native    | published port, or the container IP where routable    |
+| `egressControl`                            |   native    | on/off only; `allow-list` throws                      |
+| `snapshot` / `fork`                        |   native    | `commit`, filesystem only                             |
+| `templateBuild`                            |   native    | `dockerfile`, `image`, `snapshot` sources             |
+| `volumes`                                  |   native    | named volumes; absolute paths become bind mounts      |
+| `metrics`                                  |   native    | `/stats`                                              |
+| `gpu`                                      |   native    | `DeviceRequests` (needs the NVIDIA container toolkit) |
+| `privatePreview`                           | unsupported | published ports are plain localhost                   |
+| `ssh` / `codeInterpreter` / `filesWatch`   | unsupported |                                                       |
+| `region` / `secretsVault`                  | unsupported | `secrets` with no `value` are read from the host env  |
+
+### How the spec maps
+
+| sbox                                     | Docker                                                           |
+| ---------------------------------------- | ---------------------------------------------------------------- |
+| `template` / `fromSnapshot`              | `Image` (pulled if missing)                                      |
+| `env`, env-mode `secrets`                | `Env`                                                            |
+| `metadata`                               | labels `sbox.meta.<key>`                                         |
+| `name` / `idempotencyKey`                | labels `sbox.name` / `sbox.idempotency`, plus the container name |
+| `resources.vcpus` / `memoryMB` / `shmMB` | `NanoCpus` / `Memory` / `ShmSize`                                |
+| `resources.gpu` / `gpuCount`             | `DeviceRequests` (`gpu: "0,1"` selects device ids)               |
+| `ports`                                  | `ExposedPorts` + `PortBindings` (`127.0.0.1`, random host port)  |
+| `volumes`                                | `Mounts` (`volume`, or `bind` for absolute paths)                |
+| `network: { mode: "block-all" }`         | `NetworkMode: "none"`                                            |
+| `lifecycle.maxAgeMs`                     | the container stops itself after that long (see `setTimeout`)    |
+
+## Known limitations
+
+- **No egress allow-lists.** See [Egress](#egress). The shared conformance check for `allow-list` is skipped for this adapter. `block-all` and `allow-all` are covered by the adapter's own live tests.
+- **No idle timeout.** `idleTimeoutMs` and `autoResume` are ignored. `maxAgeMs` and `setTimeout()` always **stop** the container, whatever `onIdle` says. A container can't pause or delete itself from inside.
+- **`diskMB` and `region` are ignored.** Disk quotas depend on the storage driver.
+- **No in-place snapshot restore.** Boot a new container with `fromSnapshot`.
+- **`mode: "egress"` secrets throw `Validation`.** There's no proxy to inject them.
+- **One client owns its execs.** `commands.connect()` and `pty.connect()` only find sessions this process started.
+- **Commit pauses the container briefly** while the filesystem is captured.

@@ -1,20 +1,33 @@
 ---
 title: Daytona
 icon: daytona
-description: A full-featured sandbox — code interpreter with charts, stop/pause/resume, preview links, and regions. Backed by @daytonaio/sdk.
+description: Full-featured Daytona sandboxes through the stable v0 surface of @daytona/sdk. Streaming exec, PTY, code interpreter with stateful Python kernels, pause/stop, snapshots, fork, SSH, egress allow lists, vault secrets, volumes, metrics, browser-safe signed previews, and Dockerfile template builds.
 ---
 
 <ProviderLinks provider="daytona" />
 
 ## Installation
 
-`@daytonaio/sdk` is an optional peer dependency of `sbox-sdk`, loaded lazily on first use.
+`@daytona/sdk` (≥ 2.0) is an optional peer dependency of `sbox-sdk`, loaded lazily on first use.
 
 ```package-install
-sbox-sdk @daytonaio/sdk
+sbox-sdk @daytona/sdk
 ```
 
-## Usage
+<Callout type="info" title="Moved from @daytonaio/sdk">
+  `@daytonaio/sdk` is deprecated; Daytona now publishes `@daytona/sdk`. 2.x
+  ships a stable **v0** API and an alpha **v2** API. The adapter uses **v0**
+  (reached through the root client's `daytona.v0`). Uninstall `@daytonaio/sdk`
+  when you upgrade.
+</Callout>
+
+## Authentication
+
+<AuthEnv provider="daytona" />
+
+Pass `apiKey` (or `jwtToken` + `organizationId`). SDK 2.x ignores `DAYTONA_API_URL`. For a self-hosted or dev API, pass `apiUrl`, and the adapter builds the v0 client against it directly.
+
+## Quickstart
 
 ```ts
 import { createSandboxClient } from "sbox-sdk";
@@ -24,27 +37,32 @@ const client = createSandboxClient({
   provider: daytona({ apiKey: process.env.DAYTONA_API_KEY!, target: "us" }),
 });
 
-const sandbox = await client.create({ template: "debian:12" });
+const sandbox = await client.create({
+  template: "debian:12", // image ref → built on the fly; a bare name → Daytona snapshot
+  metadata: { job: "demo" },
+  lifecycle: {
+    idleTimeoutMs: 15 * 60_000,
+    onIdle: "pause",
+    maxAgeMs: 4 * 3_600_000,
+  },
+});
 
-// Daytona has a code interpreter, so `sandbox.code` is defined:
-const exec = await sandbox.code.runCode("print(2 + 2)");
-console.log(exec.logs.stdout);
+for await (const ev of sandbox.commands.run("echo out; echo err >&2")) {
+  console.log(ev);
+}
 
-await sandbox.pause(); // preserves memory
+const ctx = await sandbox.code.createContext(); // stateful Python kernel
+await sandbox.code.runCode("x = 41", { context: ctx });
+console.log(
+  (await sandbox.code.runCode("print(x + 1)", { context: ctx })).logs.stdout
+);
+
+await sandbox.pause(); // memory kept
 await sandbox.resume();
+await sandbox.destroy();
 ```
 
-[`template`](/templates) is treated as a Daytona **snapshot** name, or — when it contains a `/` or `:` — as a container **image** (e.g. `"debian:12"`). Daytona's API works in **seconds**; the adapter converts from the SDK's milliseconds for you.
-
-<Callout type="info">
-  For v0.1, `snapshot` and `background` are scoped to `unsupported` to keep the
-  surface honest — reach for [`raw()`](/escape-hatch) for Daytona-only features
-  in the meantime.
-</Callout>
-
-## Authentication
-
-<AuthEnv provider="daytona" />
+`template` is a Daytona **snapshot** name, or a container **image** when it contains `/` or `:`. `fromSnapshot` takes a snapshot name, for example one from `sandbox.snapshots.create()`.
 
 ## Options
 
@@ -53,18 +71,80 @@ await sandbox.resume();
   name="DaytonaOptions"
 />
 
+## Templates (Dockerfile builds)
+
+`client.templates.build()` builds a Daytona **snapshot** in your organization. A Dockerfile goes through `Image.fromDockerfile()`, and an `image` source goes through `Image.base()`. The result is passed to `daytona.snapshot.create({ name, image, resources }, { onLogs })`, and build logs stream through `onEvent`.
+
+```ts
+const tpl = await client.templates.build(
+  {
+    name: "borat-desktop",
+    source: {
+      dockerfile: await readFile("desktop/Dockerfile", "utf8"),
+      context: "./desktop",
+    },
+    env: { DISPLAY: ":1" },
+    workdir: "/app",
+    resources: { vcpus: 2, memoryMB: 4096, diskMB: 10_240 },
+    startCmd: "/usr/local/bin/start-vnc.sh",
+  },
+  { onEvent: (e) => e.type === "log" && console.log(e.line) }
+);
+const desktop = await client.create({ template: tpl });
+```
+
+- The snapshot is named `<name>-<first 16 hex of the cache key>` (just `sbox-<key>` when you don't set a name), so `lookup(cacheKey)` and later builds find it again.
+- The context is written to a temp directory next to the Dockerfile, so `COPY`/`ADD` work. This needs Node.
+- `startCmd` becomes the snapshot `entrypoint` (`sh -c …`). `readyCmd` isn't supported and is ignored with a log line. `user` adds a `USER` instruction.
+- `resources` apply to the snapshot (`cpu`, `memory`/`disk` in GiB, `gpu`). Snapshot sources aren't accepted. `registryAuth` isn't either: configure private registries in the Daytona dashboard.
+
+## Previews and browser auth
+
+- `ports.expose(port)` returns Daytona's standard preview link (`https://<port>-<id>.<proxy>`). For a private sandbox it carries `auth: { type: "header", headers: { "X-Daytona-Preview-Token": … } }`. That token works for **every** port and can't be revoked, so treat it as a secret.
+- `ports.expose(port, { visibility: "private" })` returns a **signed preview URL** (`https://<port>-<token>.<proxy>`) with `auth: { type: "signed-url" }`. The token is in the hostname, so it works from a browser, an iframe, or a **WebSocket** (`flags.previewBrowserAuth: true`). It's scoped to one port and expires after `previewTtlSeconds` (default 3600, max 86 400). Daytona's proxy closes WebSockets opened with it about a minute after expiry.
+
+## Lifecycle
+
+| `SandboxSpec`             | Daytona                                                                     |
+| ------------------------- | --------------------------------------------------------------------------- |
+| `lifecycle.idleTimeoutMs` | `autoStopInterval` (minutes), or `autoPauseInterval` when `onIdle: "pause"` |
+| `onIdle: "destroy"`       | `autoDeleteInterval: 0` (deleted as soon as it stops, including `stop()`)   |
+| `lifecycle.maxAgeMs`      | `ttlMinutes`: wall-clock limit since creation, destroys even if stopped     |
+| `setTimeout(ms)`          | `setTtl()`: re-anchors the wall-clock TTL from now (**not** the idle timer) |
+| `autoArchiveInterval` opt | `autoArchiveInterval` (minutes a stopped sandbox waits before archiving)    |
+
+Daytona counts idle time from SDK activity, not preview traffic. `getInfo()` refreshes from the API and maps every Daytona state (`started`, `pausing`, `archived`, `build_failed`, …) to `SandboxState`. `stop()` keeps the disk, and `pause()` keeps memory.
+
+## Network, secrets and volumes
+
+- **Egress:** `block-all` → `networkBlockAll`, `allow-list` → `networkAllowList` (CIDRs) and `domainAllowList`, both at create and at runtime (`updateNetworkSettings`). Deny rules and `inject` aren't supported.
+- **Secrets:** a `SecretRef` without a `value` mounts an existing Daytona vault Secret (`secrets: { [envVar]: name }`). The env var holds a placeholder, and the real value is substituted on egress to the Secret's allowed hosts. An inline `value` becomes a plain env var.
+- **Volumes:** `client.volumes` wraps `daytona.volume` (no size or region). `spec.volumes` mounts by id or name. Read-only mounts aren't supported.
+- **Idempotency:** each create gets a deterministic `name` from the idempotency key, so a retried create that hits 409 returns the existing sandbox. `getOrCreate` is native (`daytona.get(name)`, resuming it if stopped).
+
 ## Capabilities
 
-| Capability                         |    Level    | Notes                            |
-| ---------------------------------- | :---------: | -------------------------------- |
-| `list` / `setTimeout`              |   native    | `setTimeout` = autostop interval |
-| `stop` / `pause`                   |   native    | resume re-starts the sandbox     |
-| `streaming`                        |  emulated   | `executeCommand` is buffered     |
-| `filesUpload`                      |   native    |                                  |
-| `codeInterpreter`                  |   native    | `sandbox.code` is defined        |
-| `statefulKernel`                   | unsupported |                                  |
-| `exposePort`                       |   native    | tokenized preview links          |
-| `region`                           |   native    | `target: "us" \| "eu"`           |
-| `snapshot` / `fork` / `background` | unsupported |                                  |
+| Capability                                 |    Level    | Notes                                                               |
+| ------------------------------------------ | :---------: | ------------------------------------------------------------------- |
+| `list` / `stop` / `pause` / `setTimeout`   |   native    | list filters by labels and state on the server                      |
+| `streaming` / `background` / `killProcess` |   native    | one Daytona session per command; kill deletes the session           |
+| `stdin`                                    |   native    | `sendSessionCommandInput`                                           |
+| `pty`                                      |   native    | `createPty` / `connectPty`, resize                                  |
+| `filesUpload`                              |   native    | streaming upload; `filesWatch` unsupported                          |
+| `codeInterpreter` / `statefulKernel`       |   native    | contexts = `codeInterpreter.createContext` (Python only)            |
+| `exposePort` / `privatePreview`            |   native    | signed URLs, `previewBrowserAuth: true`                             |
+| `egressControl` / `secretsVault`           |   native    | allow lists only                                                    |
+| `snapshot` / `fork`                        |   native    | filesystem snapshots (`includesMemory: false`); fork = CoW clone    |
+| `ssh`                                      |   native    | token auth: `ssh <token>@ssh.app.daytona.io`; `privateKey` is empty |
+| `metrics` / `volumes` / `templateBuild`    |   native    | sources: `dockerfile`, `image`                                      |
+| `gpu` / `region`                           |   native    | `resources.gpu` → `gpuType`; `region` → `target`                    |
+| `proxiedFetch` / `filesWatch`              | unsupported |                                                                     |
 
-`preservesMemoryOnPause` and `preservesDiskOnStop` are both `true`; `previewModel` is `subdomain`.
+Flags: `preservesMemoryOnPause: true`, `preservesDiskOnStop: true`, `perCommandEnvCwd: false` (the core prefixes `cd`/`export`), `exitCodeNative: true`, `previewBrowserAuth: true`, `previewModel: "subdomain"`.
+
+## Known limitations
+
+- `resources` only apply to image-based creates (`template: "debian:12"`). On snapshot-based creates they throw `Validation`, so set them on the template instead.
+- Commands run in Daytona sessions, so output arrives through the log stream rather than a raw pipe. Exit codes come from `getSessionCommand`.
+- `snapshots.create({ mode: "memory" })` throws (Daytona snapshots are filesystem-only). Restoring always boots a new sandbox, so use `client.create({ fromSnapshot })`.
+- Daytona timeouts are in seconds or minutes. The adapter rounds milliseconds **up**.

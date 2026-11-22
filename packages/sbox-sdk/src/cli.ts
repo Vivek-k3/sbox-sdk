@@ -23,6 +23,74 @@ interface ProviderMeta {
   pkg: string | null;
 }
 
+/**
+ * Factory option -> environment variable, per provider. The CLI builds the
+ * factory options from these so `sbox verify e2b` just works with E2B_API_KEY
+ * set. Kept in sync with each adapter's `live.ts`.
+ */
+const ENV_OPTIONS: Record<string, Record<string, string>> = {
+  "aws-lambda": {
+    imageIdentifier: "AWS_LAMBDA_MICROVM_IMAGE_ARN",
+    region: "AWS_REGION",
+  },
+  beam: { token: "BEAM_TOKEN", workspaceId: "BEAM_WORKSPACE_ID" },
+  blaxel: { apiKey: "BL_API_KEY", workspace: "BL_WORKSPACE" },
+  codesandbox: { apiKey: "CSB_API_KEY" },
+  daytona: { apiKey: "DAYTONA_API_KEY", target: "DAYTONA_TARGET" },
+  docker: { socketPath: "DOCKER_HOST" },
+  e2b: { apiKey: "E2B_API_KEY", domain: "E2B_DOMAIN" },
+  fly: {
+    apiToken: "FLY_API_TOKEN",
+    appName: "FLY_APP_NAME",
+    region: "FLY_REGION",
+  },
+  freestyle: { apiKey: "FREESTYLE_API_KEY", baseUrl: "FREESTYLE_BASE_URL" },
+  modal: {
+    environment: "MODAL_ENVIRONMENT",
+    tokenId: "MODAL_TOKEN_ID",
+    tokenSecret: "MODAL_TOKEN_SECRET",
+  },
+  morph: { apiKey: "MORPH_API_KEY" },
+  northflank: {
+    projectId: "NORTHFLANK_PROJECT_ID",
+    teamId: "NORTHFLANK_TEAM_ID",
+    token: "NORTHFLANK_API_TOKEN",
+  },
+  railway: { environmentId: "RAILWAY_ENVIRONMENT_ID", token: "RAILWAY_TOKEN" },
+  runloop: { apiKey: "RUNLOOP_API_KEY" },
+  sprites: { baseURL: "SPRITES_BASE_URL", token: "SPRITES_TOKEN" },
+  superserve: { apiKey: "SUPERSERVE_API_KEY", baseUrl: "SUPERSERVE_BASE_URL" },
+  tensorlake: {
+    apiKey: "TENSORLAKE_API_KEY",
+    projectId: "TENSORLAKE_PROJECT_ID",
+  },
+  together: { apiKey: "TOGETHER_API_KEY", baseUrl: "TOGETHER_BASE_URL" },
+  vercel: {
+    projectId: "VERCEL_PROJECT_ID",
+    teamId: "VERCEL_TEAM_ID",
+    token: "VERCEL_TOKEN",
+  },
+};
+
+function optionsFromEnv(id: string): Record<string, unknown> {
+  const opts: Record<string, unknown> = {};
+  for (const [option, env] of Object.entries(ENV_OPTIONS[id] ?? {})) {
+    let value = process.env[env];
+    if (value === undefined || value === "") {
+      continue;
+    }
+    // docker: DOCKER_HOST=unix:///path -> socketPath; tcp:// is handled by the adapter
+    if (id === "docker" && option === "socketPath") {
+      if (!value.startsWith("unix://")) {
+        continue;
+      }
+      value = value.slice("unix://".length);
+    }
+    opts[option] = value;
+  }
+  return opts;
+}
+
 /** Registry of the network-backed adapters the CLI can drive by id. */
 const PROVIDERS: Record<string, ProviderMeta> = {
   e2b: { caps: "E2B_CAPS", factory: "e2b", pkg: "@e2b/code-interpreter" },
@@ -32,7 +100,7 @@ const PROVIDERS: Record<string, ProviderMeta> = {
     factory: "cloudflare",
     pkg: "@cloudflare/sandbox",
   },
-  daytona: { caps: "DAYTONA_CAPS", factory: "daytona", pkg: "@daytonaio/sdk" },
+  daytona: { caps: "DAYTONA_CAPS", factory: "daytona", pkg: "@daytona/sdk" },
   modal: { caps: "MODAL_CAPS", factory: "modal", pkg: "modal" },
   fly: { caps: "FLY_CAPS", factory: "fly", pkg: null },
   "aws-lambda": {
@@ -59,6 +127,24 @@ const PROVIDERS: Record<string, ProviderMeta> = {
   blaxel: { caps: "BLAXEL_CAPS", factory: "blaxel", pkg: "@blaxel/core" },
   beam: { caps: "BEAM_CAPS", factory: "beam", pkg: "@beamcloud/beam-js" },
   railway: { caps: "RAILWAY_CAPS", factory: "railway", pkg: "railway" },
+  docker: { caps: "DOCKER_CAPS", factory: "docker", pkg: null },
+  superserve: {
+    caps: "SUPERSERVE_CAPS",
+    factory: "superserve",
+    pkg: "@superserve/sdk",
+  },
+  tensorlake: {
+    caps: "TENSORLAKE_CAPS",
+    factory: "tensorlake",
+    pkg: "tensorlake",
+  },
+  sprites: { caps: "SPRITES_CAPS", factory: "sprites", pkg: "@fly/sprites" },
+  freestyle: { caps: "FREESTYLE_CAPS", factory: "freestyle", pkg: "freestyle" },
+  together: {
+    caps: "TOGETHER_CAPS",
+    factory: "together",
+    pkg: "together-sandbox",
+  },
 };
 
 const LEVEL_SYMBOL: Record<CapabilityLevel, string> = {
@@ -97,11 +183,15 @@ function printHelp(): void {
       "  sbox doctor [<provider>]        validate node + provider SDK setup",
       "  sbox exec <provider> -- <cmd>   run one command in a fresh sandbox",
       "  sbox list <provider>            list a provider's live sandboxes",
+      "  sbox verify <provider>          check credentials without creating a sandbox",
+      "  sbox templates build <provider> <dir> [--name <alias>] [--force]",
+      "                                  build <dir>/Dockerfile as a reusable template",
       "",
       `Providers: ${Object.keys(PROVIDERS).join(", ")}`,
       "",
-      "Credentials for exec/list are read from the environment (see each",
-      "provider's docs). caps and doctor run fully offline.",
+      "Credentials are read from the environment (e.g. E2B_API_KEY, DAYTONA_API_KEY,",
+      "MODAL_TOKEN_ID/MODAL_TOKEN_SECRET; see each provider's docs). caps and doctor",
+      "run fully offline; docker needs no credentials.",
     ].join("\n")
   );
 }
@@ -116,7 +206,13 @@ async function cmdCaps(id: string | undefined): Promise<number> {
     return unknownProvider(id);
   }
   const mod = await importProvider(id);
-  const map = mod[meta.caps] as Record<string, CapabilityLevel> | undefined;
+  const capsKey =
+    meta.caps in mod
+      ? meta.caps
+      : Object.keys(mod).find((k) => k.endsWith("_CAPS"));
+  const map = (capsKey ? mod[capsKey] : undefined) as
+    | Record<string, CapabilityLevel>
+    | undefined;
   if (!map) {
     writeErr(`sbox: '${id}' does not export ${meta.caps}`);
     return 1;
@@ -198,7 +294,7 @@ async function withProvider(
     writeErr(`sbox: '${id}' does not export ${meta.factory}`);
     return 1;
   }
-  return await fn(factory({}));
+  return await fn(factory(optionsFromEnv(id)));
 }
 
 async function cmdExec(
@@ -257,6 +353,74 @@ async function cmdList(id: string | undefined): Promise<number> {
   });
 }
 
+async function cmdVerify(id: string | undefined): Promise<number> {
+  if (!id) {
+    writeErr("sbox: verify needs a provider, e.g. `sbox verify e2b`");
+    return 1;
+  }
+  const { createSandboxClient } = await import("./index.js");
+  return await withProvider(id, async (provider) => {
+    const client = createSandboxClient({ provider });
+    try {
+      const res = await client.verify();
+      if (res.ok) {
+        write(
+          `✔ ${id} credentials work${res.account ? ` (${res.account})` : ""}`
+        );
+        return 0;
+      }
+      writeErr(`✖ ${id}: ${res.error.message}`);
+      return 1;
+    } finally {
+      await client.dispose();
+    }
+  });
+}
+
+async function cmdTemplatesBuild(rest: string[]): Promise<number> {
+  const [sub, id, dir] = rest;
+  if (sub !== "build" || !id || !dir) {
+    writeErr(
+      "sbox: usage: sbox templates build <provider> <dir> [--name <alias>] [--force]"
+    );
+    return 1;
+  }
+  const nameIdx = rest.indexOf("--name");
+  const name = nameIdx === -1 ? undefined : rest[nameIdx + 1];
+  const force = rest.includes("--force");
+  const { readFile } = await import("node:fs/promises");
+  const { join, resolve } = await import("node:path");
+  const root = resolve(dir);
+  const dockerfile = await readFile(join(root, "Dockerfile"), "utf-8");
+  const { createSandboxClient } = await import("./index.js");
+  return await withProvider(id, async (provider) => {
+    const client = createSandboxClient({ provider });
+    try {
+      if (!client.templates) {
+        writeErr(`sbox: ${id} cannot build templates`);
+        return 1;
+      }
+      const ref = await client.templates.build(
+        { name, source: { context: root, dockerfile } },
+        {
+          force,
+          onEvent: (e) => {
+            if (e.type === "log") {
+              process.stderr.write(`${e.line.replace(/\n$/, "")}\n`);
+            } else {
+              writeErr(`[${e.status}]${e.message ? ` ${e.message}` : ""}`);
+            }
+          },
+        }
+      );
+      write(ref.id);
+      return 0;
+    } finally {
+      await client.dispose();
+    }
+  });
+}
+
 async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
 
@@ -282,6 +446,10 @@ async function main(argv: string[]): Promise<number> {
     }
     case "list":
       return await cmdList(rest[0]);
+    case "verify":
+      return await cmdVerify(rest[0]);
+    case "templates":
+      return await cmdTemplatesBuild(rest);
     default:
       writeErr(`sbox: unknown command '${cmd}'. Try \`sbox help\`.`);
       return 1;

@@ -2,9 +2,12 @@
 name: sbox-sdk
 description: >-
   Set up and use sbox-sdk, the unified TypeScript SDK for agent sandboxes (E2B,
-  Vercel, Cloudflare, and a built-in in-memory provider). Covers installing the
-  SDK plus an adapter, creating a sandbox client, running shell commands,
-  reading/writing files, executing code, exposing ports, and giving an AI agent
+  Daytona, Vercel, Modal, Tensorlake, Superserve, Fly Sprites, Freestyle,
+  Together, Blaxel, Beam, Railway, Northflank, Fly, AWS Lambda MicroVMs, local
+  Docker, and a built-in in-memory provider). Covers installing the SDK plus an
+  adapter, creating a sandbox client, running shell commands, reading/writing
+  files, executing code, building templates from a Dockerfile, exposing ports
+  (incl. browser-safe private previews), PTY terminals, pause/resume, and giving an AI agent
   framework (Vercel AI SDK, OpenAI Agents, Mastra, Anthropic, LangChain) sandbox
   tools via the ai() plugin. Use when adding a code sandbox to a project, running
   untrusted or model-generated code in isolation, or letting an LLM agent run
@@ -35,9 +38,14 @@ providers. The core is fetch-only and runs on Node 20+, Bun, Deno, and edge/Work
    npm install sbox-sdk @e2b/code-interpreter
    ```
 
-   Other adapters and their peers: Vercel → `@vercel/sandbox`, Cloudflare (inside
-   a Worker) → `@cloudflare/sandbox`. The **in-memory** provider (`sbox-sdk/testing`)
-   needs no peer dependency and is the zero-config default — use it for tests.
+   Other adapters and their peers: Daytona → `@daytona/sdk`, Vercel →
+   `@vercel/sandbox`, Modal → `modal`, Superserve → `@superserve/sdk`, Fly Sprites →
+   `@fly/sprites`, Freestyle → `freestyle`, Together → `together-sandbox`, Blaxel →
+   `@blaxel/core`, Beam → `@beamcloud/beam-js`, Railway → `railway`. **No peer
+   needed:** `sbox-sdk/docker` (local Docker/OrbStack/Podman), `sbox-sdk/tensorlake`
+   (REST; `tensorlake` only for template builds), `sbox-sdk/fly`, and the
+   **in-memory** provider (`sbox-sdk/memory`), which is the zero-config default
+   for tests. Deprecated: `cloudflare`, `codesandbox` (use `together`), `runloop`.
 
 2. Create a client and a sandbox. Each adapter is a subpath import:
 
@@ -49,7 +57,10 @@ providers. The core is fetch-only and runs on Node 20+, Bun, Deno, and edge/Work
      provider: e2b({ apiKey: process.env.E2B_API_KEY! }),
    });
 
-   const sandbox = await client.create({ template: "node", ttlMs: 60_000 });
+   const sandbox = await client.create({
+     template: "node",
+     lifecycle: { maxAgeMs: 60_000 },
+   });
    ```
 
 ## Core API
@@ -80,21 +91,37 @@ providers. The core is fetch-only and runs on Node 20+, Bun, Deno, and edge/Work
   - `sandbox.snapshots?.{create,restore,list,delete}`.
   - `sandbox.network?.setEgressPolicy(policy)`.
 
-- **Lifecycle** lives on the sandbox: `getInfo()`, `setTimeout(ttlMs)`, `pause()`,
-  `resume()`, `stop()`, `destroy()`.
+  - `sandbox.pty?.create({ cols, rows })`: interactive terminal (async-iterable bytes, `write`, `resize`).
+  - `sandbox.ssh?.create()`, `client.templates?`, `client.volumes?`.
+
+- **Templates**: `client.templates?.build({ source: { dockerfile, context } })`, or pass
+  the spec inline as `create({ template: { source: {...} } })`. Builds run in the
+  user's own account and are cached by content hash, so a second create doesn't rebuild.
+  Check `client.capabilities.flags.templateSources`.
+
+- **Previews**: `ports.expose(port, { visibility: "private" })` returns `{ url, wsUrl, auth }`.
+  `browserUrl(preview, { protocol: "ws" })` (from `sbox-sdk`) gives a URL a browser
+  WebSocket can open; it throws for header-only auth. Check `flags.previewBrowserAuth`.
+
+- **Lifecycle** lives on the sandbox: `getInfo()` (live state), `setTimeout(ttlMs)`, `pause()`,
+  `resume()`, `stop()`, `destroy()`, `fork()`, `metrics()`. Set `create({ lifecycle:
+{ idleTimeoutMs, maxAgeMs, onIdle, autoResume } })`. Reconnect after a restart with
+  `client.connect(id, { resume: true })`, or use `client.getOrCreate({ name })`.
+  `client.verify()` checks credentials without creating anything.
 
 - **Escape hatch** — `sandbox.raw()` is the native provider client, typed per adapter.
 
 ## Rules and gotchas
 
 - **Never assume a capability exists.** `sandbox.code` / `ports` / `snapshots` /
-  `network` are `undefined` on providers that don't support them. Use `?.` or
+  `network` / `pty` / `ssh` and `client.templates` / `volumes` are `undefined` on
+  providers that don't support them. Use `?.` or
   `if (sandbox.can("codeInterpreter")) { ... }`.
 - **`commands.run` does not throw on non-zero exit** — check `exitCode`. Wrap only
   for `SandboxError` (transport/quota/timeout), which carries a `retryable` flag.
 - **Install the adapter's peer dep**, or the lazy import throws
   `ERR_MODULE_NOT_FOUND` naming the missing package.
-- **Always bound a sandbox's life** with `ttlMs` (on `create`) or `setTimeout`, and
+- **Always bound a sandbox's life** with `lifecycle` (on `create`) or `setTimeout`, and
   call `destroy()` (or `stop`/`pause`) when done, so sandboxes don't leak.
 - Provider-specific features outside the unified surface live behind `sandbox.raw()`.
 

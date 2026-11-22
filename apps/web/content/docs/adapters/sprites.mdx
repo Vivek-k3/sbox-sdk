@@ -1,0 +1,134 @@
+---
+title: Fly Sprites
+icon: sprites
+description: Named, persistent Firecracker VMs on Fly.io that pause on their own when idle. Streamed exec, detachable TTY sessions, native files, filesystem checkpoints and DNS egress policy, via @fly/sprites.
+---
+
+<ProviderLinks provider="sprites" />
+
+## Installation
+
+`@fly/sprites` is an optional peer dependency of `sbox-sdk`. It needs **Node.js 24 or later** and is imported lazily, so importing `sbox-sdk/sprites` stays cheap on older runtimes until you create a sprite.
+
+```package-install
+sbox-sdk @fly/sprites
+```
+
+## Usage
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { sprites } from "sbox-sdk/sprites";
+
+const client = createSandboxClient({
+  provider: sprites({ token: process.env.SPRITES_TOKEN! }),
+});
+
+// Sprites are named and persistent: getOrCreate is native.
+const sandbox = await client.getOrCreate({ name: "agent-42" });
+console.log(sandbox.id); // "agent-42" (the sprite name is the id)
+
+for await (const ev of sandbox.commands.run("npm install")) {
+  if (ev.type === "stdout") process.stdout.write(ev.data);
+}
+
+await sandbox.files.write("/home/sprite/state.json", '{"v":1}');
+const ref = await sandbox.snapshots!.create({ name: "after-install" });
+// ...later, roll back in place:
+await sandbox.snapshots!.restore(ref);
+```
+
+`create()` without a `name` derives a deterministic name from the idempotency key (`sbox-<hash>`), so a retried create never makes a second sprite.
+
+## Authentication
+
+| Option    | Env var            | Required | Notes                                              |
+| --------- | ------------------ | :------: | -------------------------------------------------- |
+| `token`   | `SPRITES_TOKEN`    |   yes    | Org token (`sprite auth setup --token`, dashboard) |
+| `baseURL` | `SPRITES_BASE_URL` |    no    | Defaults to `https://api.sprites.dev`              |
+
+`client.verify()` lists one sprite and reports the organization name; it never creates anything.
+
+## Options
+
+<AutoTypeTable
+  path="../../packages/sbox-sdk/src/sprites/index.ts"
+  name="SpritesOptions"
+/>
+
+## Spec mapping
+
+| `SandboxSpec` field                                     | Sprites                                                           |
+| ------------------------------------------------------- | ----------------------------------------------------------------- |
+| `name`                                                  | sprite name (also stored as the `sbox-name` label)                |
+| `template`                                              | `"default"` or `"dev"` only, mapped to `runtime`                  |
+| `env`                                                   | sprite `environment`                                              |
+| `metadata`                                              | labels, encoded as `key=value` (percent-encoded)                  |
+| `resources`                                             | `config.cpus`, `config.ramMB`, `config.storageGB` (from `diskMB`) |
+| `region`                                                | `config.region`                                                   |
+| `network`                                               | network policy, applied right after creation                      |
+| `secrets` (inline `value`)                              | added to `environment`                                            |
+| `idempotencyKey`                                        | deterministic sprite name when `name` is omitted                  |
+| `fromSnapshot`, `volumes`, GPU, secrets without a value | rejected with a `Validation` error                                |
+| `lifecycle`                                             | ignored: sprites always pause when idle and wake on demand        |
+
+## Lifecycle and states
+
+A sprite is **running** while something uses it. About 30 seconds after activity stops it goes **warm** (VM suspended, memory kept), and later **cold** (VM stopped, disk only). Any exec, file call or URL request wakes it.
+
+| Sprite status | `SandboxState` |
+| ------------- | -------------- |
+| `running`     | `running`      |
+| `warm`        | `paused`       |
+| `cold`        | `stopped`      |
+
+There is no explicit pause or stop API, so the `pause` and `stop` capabilities are `unsupported`; a sprite in `paused` or `stopped` is still usable directly. `destroy()` deletes the sprite and its checkpoints.
+
+## Previews and browser auth
+
+Each sprite has **one** URL, `https://<name>-<org-id>.sprites.app`. It routes to port `8080`, or to the first HTTP port opened when nothing listens on 8080. `ports.expose(port)` returns that URL. It does not create per-port hosts.
+
+Visibility is **sprite-wide**:
+
+- `expose(port)` (public) sets URL auth to `public`, so anyone with the URL can reach it.
+- `expose(port, { visibility: "private" })` sets URL auth to `sprite` (org members only). The preview carries `auth: { type: "header", headers: { Authorization: "Bearer <token>" } }`.
+
+Private previews need an `Authorization` header, which a browser WebSocket cannot send, so `previewBrowserAuth` is `false`. To use a private sprite URL from a browser, proxy it through your backend. The other option is a public URL protected by your own app-level auth.
+
+## Terminals
+
+`sandbox.pty.create()` starts a detachable TTY session (a tmux session on the sprite). The PTY id is the server session id, so `sandbox.pty.connect(id)` can reattach from another process, and `commands.list()` shows active sessions. TTY sessions stop when the sprite goes cold.
+
+## Capabilities
+
+| Capability                         |    Level    | Notes                                                   |
+| ---------------------------------- | :---------: | ------------------------------------------------------- |
+| `list`                             |   native    | paginated; metadata/state filters applied client-side   |
+| `streaming` / `stdin`              |   native    | WebSocket exec, stdout and stderr kept separate         |
+| `background` / `killProcess`       |   native    | spawned commands, plus exec sessions by id              |
+| `pty`                              |   native    | detachable TTY sessions (create/attach/kill)            |
+| `filesUpload` / `filesWatch`       |   native    | Sprites filesystem API                                  |
+| `exposePort` / `privatePreview`    |   native    | one URL per sprite; sprite-wide visibility; header auth |
+| `egressControl`                    |   native    | DNS allow/deny rules; no CIDRs, no credential injection |
+| `snapshot`                         |   native    | filesystem checkpoints, restored in place               |
+| `region`                           |   native    | `config.region`                                         |
+| `pause` / `stop` / `setTimeout`    | unsupported | pausing is automatic                                    |
+| `templateBuild`                    | unsupported | no custom images; a checkpoint cannot seed a new sprite |
+| `fork` / `volumes` / `gpu`         | unsupported |                                                         |
+| `ssh` / `metrics` / `secretsVault` | unsupported | Connectors are not wired in                             |
+| `codeInterpreter`                  | unsupported |                                                         |
+
+Flags: `perCommandEnvCwd: true`, `exitCodeNative: true`, `preservesMemoryOnPause: true` (warm), `preservesDiskOnStop: true` (cold), `previewModel: "subdomain"`, `previewBrowserAuth: false`, `templateSources: []`.
+
+## Snapshots
+
+`snapshots.create({ name })` creates a checkpoint with `name` as its comment and returns its id (`v0`, `v1`, ...). Checkpoints capture the **filesystem only** (`includesMemory: false`), so `mode: "memory"` is rejected. `snapshots.restore(ref)` restores in place: the sprite restarts and active sessions end. `snapshots.list()` lists your checkpoints. `snapshots.delete()` is not available because the SDK has no delete call; use `sprite checkpoint delete` from the CLI.
+
+## Known limitations
+
+- No custom images: `template` only selects the `default` or `dev` runtime, and checkpoints restore in place only.
+- One HTTP URL per sprite, with sprite-wide public/private visibility.
+- `commands.run({ timeoutMs })` is enforced by the core, which kills the command. The Sprites WebSocket exec has no server-side timeout.
+- `user` in `ExecOptions` is ignored: commands run as the sprite user.
+- Processes started with `commands.run`/`spawn` stop when the sprite goes cold. Use Sprites Services (`sprite-env services`) for anything that must survive.
+- Resource config (`cpus`, `ramMB`, `storageGB`) is passed through, but Sprites currently manages these values itself.

@@ -38,6 +38,7 @@ const FAILING_CAPS = {
   stop: "unsupported",
   streaming: "unsupported",
   volumes: "unsupported",
+  templateBuild: "unsupported",
 } as const satisfies CapabilityMap;
 
 export type FailingCaps = typeof FAILING_CAPS;

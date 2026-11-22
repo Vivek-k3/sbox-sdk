@@ -1,20 +1,26 @@
 ---
 title: Fly Machines
 icon: fly
-description: A sandbox per Fly Machine over the Machines REST API. Pure fetch — no SDK — so it runs anywhere the core does, including the edge.
+description: A sandbox per Fly Machine over the Machines REST API. Pure fetch, no SDK, so it runs anywhere the core does, including the edge.
 ---
 
 <ProviderLinks provider="fly" />
 
 ## Installation
 
-No provider SDK required — the adapter talks to the Fly Machines REST API with `fetch`, so it's edge-portable.
+No provider SDK required: the adapter talks to the Fly Machines REST API with `fetch` (the client's `fetch`, so tests and proxies can inject their own).
 
 ```package-install
 sbox-sdk
 ```
 
-## Usage
+## Authentication
+
+<AuthEnv provider="fly" />
+
+You need an API token (`fly tokens create deploy -a <app>` or an org token) and an **existing app**: each sandbox is a Machine inside it. The live tests read `FLY_API_TOKEN`, `FLY_APP_NAME` and optionally `FLY_REGION`.
+
+## Quickstart
 
 ```ts
 import { createSandboxClient } from "sbox-sdk";
@@ -23,29 +29,80 @@ import { fly } from "sbox-sdk/fly";
 const client = createSandboxClient({
   provider: fly({
     apiToken: process.env.FLY_API_TOKEN!,
-    appName: "my-fly-app", // must already exist
+    appName: process.env.FLY_APP_NAME!, // must already exist
     region: "iad",
   }),
 });
 
-const sandbox = await client.create({ template: "ubuntu:22.04" });
-const res = await sandbox.commands.run("uname -a");
+const sandbox = await client.create({
+  template: "node:22", // any image; default ubuntu:22.04
+  resources: { vcpus: 2, memoryMB: 1024, diskMB: 8192 },
+  metadata: { team: "agents" },
+});
+const res = await sandbox.commands.run("node -v");
 console.log(res.stdout);
+await sandbox.destroy();
 ```
 
-The Fly app must exist; each sandbox is a **Machine** inside it. [`template`](/templates) is the machine's container image.
+`template` is the Machine's container image. Machines boot with `init.exec = ["sleep","inf"]` and `restart: { policy: "no" }`, so plain images (whose `CMD` would exit) stay up and a stopped machine stays stopped. Pass `keepAlive: false` for images that run their own long-lived process.
+
+## How it maps
+
+| Spec field               | Fly Machines API                                                                               |
+| ------------------------ | ---------------------------------------------------------------------------------------------- |
+| `template`               | `config.image`                                                                                 |
+| `env`                    | `config.env`                                                                                   |
+| `metadata`               | `config.metadata` (filterable server-side with `metadata.<key>=` on list)                      |
+| `resources`              | `guest.cpus`, `guest.memory_mb` (rounded up to 256 MB, 1024 for performance), `rootfs.size_gb` |
+| `region`                 | `region`                                                                                       |
+| `ports`                  | machine `services` (see previews)                                                              |
+| `lifecycle.onIdle`       | `services[].autostop` (`pause` → `suspend`, `stop` → `stop`), `autoResume` → `autostart`       |
+| `volumes`                | `config.mounts` (Fly allows one volume per machine)                                            |
+| `secrets` (with `value`) | app secret (`POST /apps/{app}/secrets/{name}`) + `min_secrets_version`                         |
+| `idempotencyKey`         | `sbox-idem` metadata; a retried create returns the existing machine                            |
+
+The root filesystem uses `rootfs.persist = "always"` (opt out with `persistRootfs: false`), so files survive `stop()`/`resume()` and the restarts caused by config updates.
+
+## Exec and files
+
+- `/exec` is buffered and limited to **600 s per command**. `timeoutMs` is passed through (clamped); commands without one get `execTimeoutSec` (default 600). Longer jobs should be started detached (`nohup … &`) and polled.
+- `kill()` finds the command through `/ps` (every exec carries a unique `$0` marker) and SIGKILLs its process tree from inside the machine. `commands.list()` is `/ps`; `commands.kill(pid)` signals any pid.
+- File writes send the bytes in the exec request's `stdin` field (never argv), in 768 KiB chunks, so large and binary files round-trip. Reads fall back to chunked `dd` when a response would exceed Fly's output limit.
+- There is no per-command `cwd`/`env`, so the core wraps the command (`perCommandEnvCwd: false`).
+
+## Previews
+
+Fly routes per **app**, not per machine: the URL is always `https://<app>.fly.dev` (or `appDomain`). `ports.expose(port)` adds a machine service (the first port on 443, later ones on their own number) and returns:
+
+```ts
+const p = await sandbox.ports.expose(8080);
+// { url: "https://my-app.fly.dev", auth: { type: "header", headers: { "fly-force-instance-id": "<machine id>" } } }
+await sandbox.ports.fetch(8080, "/health"); // adds the header for you
+```
+
+The `fly-force-instance-id` header pins the request to this machine; without it Fly Proxy may route to any machine of the app that serves the same port. Because it is a header, it can't be set from a browser WebSocket (`previewBrowserAuth: false`). It is a routing header, not authentication: the service is public. The app needs a public IP (`fly ips allocate-v6`, or a shared v4).
 
 <Callout type="warn">
-  Fly's `/exec` is **buffered** and has no per-command `cwd`/`env`, so the core
-  folds those into a `cd … && KEY=v …` wrapper (`perCommandEnvCwd: false`) and
-  `streaming` is emulated. `stop()` releases compute but the **rootfs resets**
-  unless a volume is attached (`preservesDiskOnStop: false`). Files are read and
-  written via `exec` + `base64`.
+  Exposing a port on a running machine updates its config, which **restarts**
+  the machine (files survive thanks to `rootfs.persist`, processes do not).
+  Declare ports up front with `spec.ports` to avoid the restart.
 </Callout>
 
-## Authentication
+## Volumes and secrets
 
-<AuthEnv provider="fly" />
+```ts
+const vol = await client.volumes.create({
+  name: "data",
+  sizeMB: 10_240,
+  region: "iad",
+});
+const sb = await client.create({
+  region: "iad",
+  volumes: [{ id: vol.id, mountPath: "/data" }],
+});
+```
+
+`secrets: [{ name: "API_KEY", value }]` writes an **app secret**, which every machine in the app can read. A secret without `value` must already exist and is exposed under its own name.
 
 ## Options
 
@@ -56,14 +113,24 @@ The Fly app must exist; each sandbox is a **Machine** inside it. [`template`](/t
 
 ## Capabilities
 
-| Capability          |    Level    | Notes                           |
-| ------------------- | :---------: | ------------------------------- |
-| `list` / `region`   |   native    |                                 |
-| `stop` / `pause`    |   native    | `pause` = suspend (memory kept) |
-| `streaming`         |  emulated   | `/exec` is buffered             |
-| `filesUpload`       |   native    | via `exec` + base64             |
-| `exposePort`        |   native    | preview at `<app>.fly.dev`      |
-| `codeInterpreter`   | unsupported |                                 |
-| `snapshot` / `fork` | unsupported |                                 |
+| Capability                    |    Level    | Notes                                           |
+| ----------------------------- | :---------: | ----------------------------------------------- |
+| `list` / `region`             |   native    | `fly-next-cursor` pagination                    |
+| `stop` / `pause`              |   native    | `pause` = suspend (memory kept)                 |
+| `killProcess`                 |   native    | `/ps` + `kill` inside the machine               |
+| `exposePort` / `proxiedFetch` |   native    | app URL + `fly-force-instance-id`               |
+| `volumes` / `secretsVault`    |   native    | Fly volumes; app secrets                        |
+| `streaming`                   |  emulated   | `/exec` is buffered                             |
+| `privatePreview`              | unsupported | Fly previews are public; the header only routes |
+| `gpu`                         | unsupported | the Machines API rejects GPU requests           |
+| `snapshot` / `fork`           | unsupported | volume snapshots are not machine snapshots      |
+| `setTimeout` / `background`   | unsupported |                                                 |
+| `pty` / `ssh` / `stdin`       | unsupported | `/exec` has no interactive stream               |
 
-`perCommandEnvCwd` is `false` (core wraps); `preservesMemoryOnPause` is `true`; `preservesDiskOnStop` is `false`; `previewModel` is `subdomain`.
+Flags: `perCommandEnvCwd: false`, `preservesMemoryOnPause: true`, `preservesDiskOnStop: true` (with `persistRootfs`), `previewModel: "declaredPorts"`.
+
+## Limitations
+
+- 600 s per exec call; output is returned only when the command ends.
+- `lifecycle.idleTimeoutMs` and `maxAgeMs` have no Fly equivalent (Fly Proxy decides when an idle service autostops).
+- `verify()` calls `GET /apps/{app}` and returns the org slug.

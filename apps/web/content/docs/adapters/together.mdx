@@ -1,0 +1,168 @@
+---
+title: Together Sandbox
+icon: together
+description: Firecracker VMs booted from snapshots on Together AI (the successor to CodeSandbox). Remote Dockerfile builds, streamed execs, PTY, and hibernate/resume, via together-sandbox.
+---
+
+<ProviderLinks provider="together" />
+
+## Installation
+
+`together-sandbox` is an optional peer dependency of `sbox-sdk`, loaded lazily on first use.
+
+```package-install
+sbox-sdk together-sandbox
+```
+
+Together Sandbox is allowlist-only: your Together account needs sandbox access.
+
+## Authentication
+
+| Option            | Env var             | Required | Notes                                                      |
+| ----------------- | ------------------- | :------: | ---------------------------------------------------------- |
+| `apiKey`          | `TOGETHER_API_KEY`  |   yes    | Together AI API key                                        |
+| `baseUrl`         | `TOGETHER_BASE_URL` |    no    | Management API host, without `/v1`                         |
+| `defaultTemplate` | —                   |    no    | Snapshot alias or id used when `create()` gets no template |
+
+```ts
+const ok = await client.verify(); // one `sandboxes.list({ limit: 1 })` call, never creates
+```
+
+## Usage
+
+Every Together sandbox boots from a **snapshot**. There is no default image, so pass a template: a snapshot alias or id, or a `TemplateSpec` that is built on first use.
+
+```ts
+import { createSandboxClient } from "sbox-sdk";
+import { together } from "sbox-sdk/together";
+
+const client = createSandboxClient({
+  provider: together({ apiKey: process.env.TOGETHER_API_KEY! }),
+});
+
+const sandbox = await client.create({
+  template: {
+    source: {
+      dockerfile: "FROM node:22-bookworm\nRUN npm i -g pnpm\n",
+    },
+  },
+  resources: { vcpus: 2, memoryMB: 4096 },
+  metadata: { team: "agents" },
+  env: { NODE_ENV: "production" },
+});
+
+const res = await sandbox.commands.run("node --version");
+console.log(res.stdout);
+```
+
+## Templates
+
+`client.templates.build()` uses `sdk.snapshots.create()`, which builds remotely on Together's image builder. No local Docker is needed.
+
+- **Dockerfile:** the build context (a directory or in-memory files) is written to a temp dir and uploaded. `TemplateSpec.env`, `workdir` and `user` are appended as `ENV`, `WORKDIR` and `USER` lines.
+- **Image:** must be publicly pullable. `registryAuth` is rejected.
+- **Snapshot:** an existing snapshot id gets an alias.
+
+Each built snapshot gets the alias `<name>@<cacheKey prefix>` and the tags `sbox-template=1` and `sbox-template-key=<cacheKey>`. Together's native `cacheKey` is set to `sbox/<name>`, so rebuilds of one template reuse the remote layer cache. `templates.get()` finds a template by cache key, alias or snapshot id. `templates.delete()` retires the snapshot.
+
+```ts
+const ref = await client.templates!.build(
+  {
+    name: "borat-desktop",
+    source: {
+      dockerfile: "FROM debian:bookworm\nCOPY . /app\n",
+      context: "./desktop",
+    },
+  },
+  { onEvent: (e) => e.type === "log" && console.log(e.step, e.line) }
+);
+const sb = await client.create({ template: ref });
+```
+
+## Pause, resume and new ids
+
+Together's lifecycle is `create → running → terminate`:
+
+- `pause()` terminates with a memory snapshot (`terminate({ snapshot: { memory: true } })`). Processes resume intact.
+- `stop()` terminates with a filesystem-only snapshot.
+- `resume()` boots a **new sandbox with a new id** from the snapshot aliased `sandbox:<id>`. It keeps the CPU, memory, tags, TTL and termination policy.
+
+`capabilities.flags.resumeChangesId` is `true`, so re-read the id after `resume()`:
+
+```ts
+await sandbox.pause();
+await sandbox.resume();
+const { id } = await sandbox.getInfo(); // the new id; persist this one
+```
+
+The handle you hold keeps working after `resume()`, and `getInfo().id` returns the new id. `sandbox.id` is captured when the handle is built, so it still shows the old id. `client.connect(oldId, { resume: true })` resumes and returns a sandbox bound to the new id.
+
+After a resume, the parent's snapshot is retired, so the old id reads as `destroyed`. `getOrCreate` therefore never resumes the same parent twice.
+
+`getInfo()` derives the state of a terminated sandbox from its `sandbox:<id>` snapshot:
+
+| Together status                  | `SandboxState` |
+| -------------------------------- | -------------- |
+| `starting`, `recovering`         | `creating`     |
+| `running`                        | `running`      |
+| `terminating`                    | `suspending`   |
+| `failed_to_start`, `unrecovered` | `error`        |
+| `terminated` + memory snapshot   | `paused`       |
+| `terminated` + disk snapshot     | `stopped`      |
+| `terminated`, no live snapshot   | `destroyed`    |
+
+`destroy()` terminates without a snapshot. On a paused or stopped sandbox, it retires the snapshot instead.
+
+## Spec mapping
+
+| Spec field                                                  | Together                                                                                                      |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `template` / `fromSnapshot`                                 | `snapshotId` (UUID) or `snapshotAlias`                                                                        |
+| `resources.vcpus` / `memoryMB`                              | `cpu` / `memoryBytes` (disk is not configurable)                                                              |
+| `lifecycle.maxAgeMs`                                        | `ttl` (seconds from creation)                                                                                 |
+| `lifecycle.onIdle`                                          | `pause` → memory snapshot when the TTL fires; `stop` → disk snapshot; otherwise ephemeral                     |
+| `metadata`, `name`                                          | `tags` (`name` → `sbox-name`). Keys: at most 59 of `[A-Za-z0-9._-]`, alphanumeric ends                        |
+| `env`, inline `secrets`                                     | merged into every exec and PTY, and persisted in `/var/tmp/.sbox/env.json` so reconnected handles reload them |
+| `idempotencyKey`                                            | hashed into an `sbox-idem` tag; a retried create reuses the sandbox                                           |
+| `ports`, `network`, `volumes`, `region`, GPU, vault secrets | rejected with a `Validation` error                                                                            |
+
+`lifecycle.idleTimeoutMs` and `autoResume` have no equivalent: Together has no idle detection and a terminated sandbox never wakes.
+
+## Capabilities
+
+| Capability                                                                 |    Level    | Notes                                                                                                       |
+| -------------------------------------------------------------------------- | :---------: | ----------------------------------------------------------------------------------------------------------- |
+| `list`                                                                     |   native    | cursor pages, tag and status filters on the server                                                          |
+| `pause` / `stop`                                                           |   native    | terminate with a memory or disk snapshot; resume returns a new id                                           |
+| `streaming` / `background`                                                 |   native    | `execs.create` + `streamOutput`; stdout and stderr stay separate                                            |
+| `killProcess` / `stdin`                                                    |   native    | `execs.delete` / `execs.sendStdin` (text)                                                                   |
+| `pty`                                                                      |   native    | `execs.create({ pty: true })`; resize via `sendStdin({ type: "resize" })`; `pty.connect(id)` replays output |
+| `filesWatch` / `filesUpload`                                               |   native    | `files.watch`; binary-safe writes                                                                           |
+| `templateBuild`                                                            |   native    | `dockerfile`, `image`, `snapshot`                                                                           |
+| `exposePort` / `privatePreview`                                            | unsupported | the sandbox model has no preview URL yet ("coming soon")                                                    |
+| `snapshot` / `fork`                                                        | unsupported | snapshots exist only on terminate, which ends the sandbox                                                   |
+| `egressControl`                                                            | unsupported | network policy is inbound-only; outbound rules are not supported yet                                        |
+| `setTimeout`, `metrics`, `ssh`, `volumes`, `gpu`, `region`, `secretsVault` | unsupported |                                                                                                             |
+
+Flags: `perCommandEnvCwd: true`, `exitCodeNative: true`, `preservesMemoryOnPause: true`, `preservesDiskOnStop: true`, `resumeChangesId: true`, `previewModel: "none"`.
+
+## Known limitations
+
+- **File reads go through `base64` in the VM.** `files.read` returns a string, base64 for binary content with no marker. The adapter reads with `base64 -w0 <path>` instead, as Together's migration guide advises. Writes use the native binary upload.
+- **Execs run as UID 1000** unless you pass `user` (`"root"`, `"0:0"`).
+- **Exec timeouts** are enforced by the sbox core, which kills the exec. Together has no native exec timeout.
+- **Persisted env includes inline secret values** in `/var/tmp/.sbox/env.json`, so they end up in pause/stop snapshots.
+
+## Migrating from the codesandbox adapter
+
+The `codesandbox` adapter is deprecated. CodeSandbox's SDK became Together Sandbox.
+
+| `sbox-sdk/codesandbox`                 | `sbox-sdk/together`                                                          |
+| -------------------------------------- | ---------------------------------------------------------------------------- |
+| `codesandbox({ apiKey: CSB_API_KEY })` | `together({ apiKey: TOGETHER_API_KEY })` (CodeSandbox keys don't work)       |
+| `template`: a CSB template/sandbox id  | `template`: a snapshot alias/id, or a `TemplateSpec` built from a Dockerfile |
+| `pause()` (hibernate), same id         | `pause()` + `resume()`, **new id**: re-read `getInfo().id`                   |
+| `setTimeout()` (hibernation timeout)   | `lifecycle.maxAgeMs` at create (TTL from creation, not idle)                 |
+| `ports.expose()` (`*.csb.app`)         | not available yet                                                            |
+
+Rebuild your CodeSandbox templates as Dockerfiles. Existing templates and sandboxes can't be imported.

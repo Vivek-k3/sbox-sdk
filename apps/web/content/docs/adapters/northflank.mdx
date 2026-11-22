@@ -1,20 +1,26 @@
 ---
 title: Northflank
 icon: northflank
-description: A sandbox per Northflank deployment service. The services platform, driven through @northflank/js-client — a sleep-infinity container you exec into.
+description: A sandbox per Northflank deployment service, driven through @northflank/js-client. Streaming exec, PTYs, container snapshots, GPUs and metrics.
 ---
 
 <ProviderLinks provider="northflank" />
 
 ## Installation
 
-`@northflank/js-client` is an optional peer dependency of `sbox-sdk`, loaded lazily on first use.
+`@northflank/js-client` is an optional peer dependency of `sbox-sdk`, loaded lazily on first use. Node-only (the SDK uses Node streams and HTTP/2).
 
 ```package-install
 sbox-sdk @northflank/js-client
 ```
 
-## Usage
+## Authentication
+
+<AuthEnv provider="northflank" />
+
+Create an API token in the Northflank team settings and an existing project. The live tests read `NORTHFLANK_API_TOKEN`, `NORTHFLANK_PROJECT_ID` and optionally `NORTHFLANK_TEAM_ID`, `NORTHFLANK_PLAN`.
+
+## Quickstart
 
 ```ts
 import { createSandboxClient } from "sbox-sdk";
@@ -22,32 +28,81 @@ import { northflank } from "sbox-sdk/northflank";
 
 const client = createSandboxClient({
   provider: northflank({
-    token: process.env.NORTHFLANK_TOKEN!,
-    projectId: "my-project", // must already exist
+    token: process.env.NORTHFLANK_API_TOKEN!,
+    projectId: process.env.NORTHFLANK_PROJECT_ID!,
   }),
 });
 
-const sandbox = await client.create({ template: "ubuntu:22.04" });
-const res = await sandbox.commands.run("echo hi && ls /");
-console.log(res.stdout);
-
-await sandbox.pause(); // scale to zero — volume kept, compute billing stops
+const sandbox = await client.create({
+  template: "ubuntu:24.04",
+  resources: { vcpus: 2, memoryMB: 4096 },
+  lifecycle: { maxAgeMs: 2 * 60 * 60_000 }, // service expires after 2 h
+});
+for await (const ev of sandbox.commands.run("apt-get update")) {
+  if (ev.type === "stdout") process.stdout.write(ev.data);
+}
+await sandbox.destroy();
 ```
 
-A sandbox is a **deployment service** that runs the base [`template`](/templates) image with a `sleep infinity` keep-alive command, so you can `exec` into it. `create()` waits (best-effort) for the service to reach `running` before returning.
+A sandbox is a **deployment service** running the image (`deployment.external.imagePath`) with a `sleep infinity` command. `create()` waits until the deployment is `COMPLETED` (or fails) before returning.
+
+## How it maps
+
+| Spec field                 | Northflank                                                                                                      |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `template`                 | `deployment.external.imagePath` (`registryCredentials` for private images)                                      |
+| `env`, inline `secrets`    | `runtimeEnvironment`                                                                                            |
+| `metadata`                 | the service description (`sbox:{json}`), so `list()` can filter it                                              |
+| `resources.vcpus/memoryMB` | smallest fitting `billing.deploymentPlan` (override with `deploymentPlan`)                                      |
+| `resources.diskMB/shmMB`   | `storage.ephemeralStorage.storageSize`, `storage.shmSize`                                                       |
+| `resources.gpu/gpuCount`   | `billing.gpu.configuration`                                                                                     |
+| `lifecycle.maxAgeMs`       | `createOptions.expiryTime` (5 min – 7 days; the service is paused, then deleted)                                |
+| `ports`                    | public HTTP ports                                                                                               |
+| `volumes`                  | `createOptions.volumesToAttach` (the volume's mount is set to `mountPath`)                                      |
+| `fromSnapshot`             | `deployment.containerSnapshot.restoreFrom`                                                                      |
+| `name` / `idempotencyKey`  | the service name; without a name it is derived from the idempotency key, so a retried create reuses the service |
+
+## Exec, PTY and files
+
+- `commands.run()` streams over `exec.execServiceSession` with separate stdout/stderr and the real exit code; `writeStdin` feeds the session's stdin.
+- Each command records its shell pid in `/tmp/.sbox-<id>.pid`; `kill()` and `timeoutMs` SIGKILL that process tree.
+- `sandbox.pty.create()` is a tty exec session (`sendInputToCurrentCommand`, `resizeTerminal`). `pty.connect(id)` works within the same process.
+- Files use the SDK's streaming copy (`upload/download.serviceStream.files`), which needs `tar` and `cat` in the image.
+- No per-command `cwd`/`env`: the core wraps the command (`perCommandEnvCwd: false`).
+
+## Previews
+
+`ports.expose(port)` adds a public HTTP port **without touching the others** (the update endpoint replaces the whole list, so the adapter merges) and returns `https://<port-name>--<service>.code.run`. `visibility: "private"` protects the port with HTTP basic auth:
+
+```ts
+const p = await sandbox.ports.expose(3000, { visibility: "private" });
+// p.auth = { type: "header", headers: { authorization: "Basic …" } }
+```
+
+Basic auth is a header, so a private preview can't be opened from a browser WebSocket (`previewBrowserAuth: false`).
+
+## Snapshots and fork
+
+`snapshots.create()` takes a Northflank **container snapshot** (filesystem only, `includesMemory: false`) and waits for it to succeed. `snapshots.restore()` redeploys the service from it, `client.create({ fromSnapshot })` boots a new service from it, and `sandbox.fork()` snapshots and restores into new services.
 
 <Callout type="warn">
-  Node-only: the SDK streams exec output over Node `EventEmitter`s, which the
-  adapter buffers. `exec` has no per-command `cwd`/`env`, so the core folds
-  those into a `cd … && KEY=v …` wrapper (`perCommandEnvCwd: false`) and
-  `streaming` is emulated. Files are read and written via `exec` + `base64`.
-  `pause()` scales the service to zero (volume retained, **memory lost**);
-  `destroy()` deletes the service and its child objects.
+  Container snapshots need a cluster with the Kata runtime (sandboxed
+  workloads). gVisor/Kata are a **cluster** setting on Northflank
+  (`sandboxing.defaultSandbox.services` for BYOC clusters), not a per-service
+  option, so the adapter has no runtime-class option.
 </Callout>
 
-## Authentication
+## Templates
 
-<AuthEnv provider="northflank" />
+Northflank builds images from a git repository or a bundle URL, so a raw Dockerfile + local context can't be uploaded. `templates.build()` accepts **`{ image }` only**: the template id is the image path plus any `env`/`startCmd`/`workdir`, encoded into the id so it works across processes.
+
+```ts
+const tpl = await client.templates.build({
+  source: { image: "node:22" },
+  env: { NODE_ENV: "production" },
+});
+const sb = await client.create({ template: tpl });
+```
 
 ## Options
 
@@ -58,15 +113,24 @@ A sandbox is a **deployment service** that runs the base [`template`](/templates
 
 ## Capabilities
 
-| Capability            |    Level    | Notes                              |
-| --------------------- | :---------: | ---------------------------------- |
-| `list`                |   native    |                                    |
-| `pause`               |   native    | scale-to-zero (volume kept)        |
-| `streaming`           |  emulated   | exec session is buffered           |
-| `filesUpload`         |   native    | via `exec` + base64                |
-| `exposePort`          |   native    | public service port → DNS          |
-| `codeInterpreter`     | unsupported |                                    |
-| `stop` / `setTimeout` | unsupported | `pause` is the keep-disk state     |
-| `snapshot` / `fork`   | unsupported | services platform, no VM snapshots |
+| Capability                      |    Level    | Notes                                       |
+| ------------------------------- | :---------: | ------------------------------------------- |
+| `list`                          |   native    | cursor pagination, metadata filter          |
+| `pause`                         |   native    | scale to zero; **memory and disk are lost** |
+| `streaming` / `stdin` / `pty`   |   native    | exec sessions                               |
+| `exposePort` / `privatePreview` |   native    | public port; basic auth when private        |
+| `snapshot` / `fork`             |   native    | container snapshots (Kata clusters)         |
+| `gpu` / `metrics`               |   native    | `billing.gpu`; `metrics.getServiceMetrics`  |
+| `templateBuild`                 |   native    | `image` sources only                        |
+| `stop` / `setTimeout`           | unsupported | `maxAgeMs` is set once at create            |
+| `ssh`                           | unsupported | the API does not expose an SSH endpoint     |
+| `volumes` / `secretsVault`      | unsupported | attach existing volumes via `spec.volumes`  |
+| `region`                        | unsupported | fixed by the project's cluster              |
 
-`perCommandEnvCwd` is `false` (core wraps); `preservesMemoryOnPause` is `false`; `previewModel` is `subdomain`.
+Flags: `perCommandEnvCwd: false`, `preservesMemoryOnPause: false`, `previewModel: "subdomain"`, `templateSources: ["image"]`.
+
+## Limitations
+
+- `pause()` scales to zero: the container and its ephemeral disk go away. Mount a volume for data that must survive.
+- `deployment.ssh.enabled` exists, but the API gives no host/port to connect to, so `ssh` stays unsupported.
+- Plan selection from `resources` uses a built-in table of Northflank plan ids; pass `deploymentPlan` to pin one.

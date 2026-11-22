@@ -1,0 +1,55 @@
+---
+title: Network & secrets
+description: Egress allow/deny policies, credential injection that never exposes secrets to the sandbox, and SSH access.
+---
+
+## Egress policy
+
+Set the policy at create time, or change it at runtime where the provider supports it:
+
+```ts
+const sandbox = await client.create({
+  network: {
+    mode: "allow-list",
+    domains: ["pypi.org", "*.github.com"],
+    cidrs: ["10.0.0.0/8"],
+  },
+});
+
+await sandbox.network!.setEgressPolicy({ mode: "block-all" });
+await sandbox.network!.setEgressPolicy({
+  mode: "allow-all",
+  deny: { domains: ["evil.example"] },
+});
+```
+
+`sandbox.network` is typed `undefined` without the `egressControl` capability. Some providers only toggle the network on and off. `client.capabilities.flags.egressModes` lists the modes a provider accepts; others throw `NotSupportedError` (e.g. Docker has no `allow-list`).
+
+## Credential injection
+
+Several providers can add credentials to outbound requests at their egress proxy. The secret **never enters the sandbox**, so an agent can call an API without being able to read or exfiltrate the key.
+
+```ts
+await client.create({
+  network: {
+    mode: "allow-all",
+    inject: [
+      {
+        domains: ["api.github.com"],
+        headers: { Authorization: { name: "gh", value: `Bearer ${token}` } },
+      },
+    ],
+  },
+  secrets: [{ name: "OPENAI_API_KEY", mode: "env" }], // a normal env-var secret
+});
+```
+
+Support varies by provider: E2B, Vercel, Modal and Freestyle implement `inject`, while Superserve brokers credentials differently and rejects it. Check each adapter's page before relying on it.
+
+## SSH
+
+```ts
+const creds = await sandbox.ssh!.create(); // { host, port, user, privateKey }
+```
+
+`sandbox.ssh` is gated on the `ssh` capability. The old `network.createSsh()` still works but is deprecated.

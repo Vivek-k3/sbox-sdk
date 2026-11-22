@@ -26,7 +26,17 @@ export interface ExecHandleOptions {
   parseExitMarker?: boolean;
   /** Normalize errors thrown while iterating the source. */
   mapError?: (err: unknown) => SandboxError;
+  /**
+   * Backstop timeout. If the source hasn't finished after this long (plus a
+   * small grace for adapters that enforce it natively), the core kills the
+   * process and rejects with a `Timeout` SandboxError.
+   */
+  timeoutMs?: number;
+  provider?: string;
 }
+
+/** Grace period on top of `timeoutMs` before the core's backstop fires. */
+export const TIMEOUT_GRACE_MS = 2000;
 
 const MARKER_RE = /__sbox_rc=(-?\d+)/;
 const MARKER_STRIP_RE = /\n?__sbox_rc=-?\d+\s*/g;
@@ -43,6 +53,7 @@ class ExecHandleImpl implements ExecHandle {
   #exitCode = 0;
   #synthExit = 0;
   #synthesized = false;
+  #timer: ReturnType<typeof setTimeout> | undefined;
 
   readonly #resultPromise: Promise<ExecResult>;
   #resolveResult!: (r: ExecResult) => void;
@@ -75,6 +86,27 @@ class ExecHandleImpl implements ExecHandle {
     }
     this.#startedPump = true;
     this.#startedAt = Date.now();
+    const { timeoutMs } = this.#opts;
+    if (timeoutMs !== undefined && timeoutMs > 0) {
+      this.#timer = setTimeout(() => {
+        if (this.#done) {
+          return;
+        }
+        this.#source.kill().catch(() => {
+          /* best effort */
+        });
+        this.#finish(
+          new SandboxError(
+            "Timeout",
+            `command timed out after ${timeoutMs}ms`,
+            {
+              provider: this.#opts.provider,
+              timedOut: true,
+            }
+          )
+        );
+      }, timeoutMs + TIMEOUT_GRACE_MS);
+    }
     void this.#pump();
   }
 
@@ -95,6 +127,9 @@ class ExecHandleImpl implements ExecHandle {
   }
 
   #handle(ev: OutputEvent): void {
+    if (this.#done) {
+      return;
+    }
     if (ev.type === "exit") {
       this.#exitCode = ev.exitCode;
       this.#events.push(ev);
@@ -125,7 +160,13 @@ class ExecHandleImpl implements ExecHandle {
   }
 
   #finish(err: unknown): void {
+    if (this.#done) {
+      return;
+    }
     this.#done = true;
+    if (this.#timer !== undefined) {
+      clearTimeout(this.#timer);
+    }
     if (err !== null && err !== undefined) {
       this.#error = this.#opts.mapError
         ? this.#opts.mapError(err)
@@ -269,6 +310,13 @@ class ExecHandleImpl implements ExecHandle {
     await this.#source.kill(signal);
   }
 
+  async closeStdin(): Promise<void> {
+    if (!this.#source.closeStdin) {
+      throw new SandboxError("NotSupported", "closing stdin is not supported");
+    }
+    await this.#source.closeStdin();
+  }
+
   async writeStdin(data: string | Uint8Array): Promise<void> {
     if (!this.#source.writeStdin) {
       throw new SandboxError("NotSupported", "stdin is not supported");
@@ -284,4 +332,44 @@ export function createExecHandle(
   opts?: ExecHandleOptions
 ): ExecHandle {
   return new ExecHandleImpl(source, opts);
+}
+
+/**
+ * A `DriverExec` whose underlying exec starts only after `prepare()` resolves
+ * (e.g. draining a stdin stream). `pid`/`kill`/`writeStdin` wait for it.
+ */
+export function deferredExec(prepare: () => Promise<DriverExec>): DriverExec {
+  let started: Promise<DriverExec> | undefined;
+  const get = (): Promise<DriverExec> => {
+    started ??= prepare();
+    return started;
+  };
+  return {
+    async *[Symbol.asyncIterator]() {
+      yield* await get();
+    },
+    async kill(signal?: string) {
+      await (await get()).kill(signal);
+    },
+    get pid() {
+      return get().then((d) => d.pid);
+    },
+    async closeStdin() {
+      const d = await get();
+      if (!d.closeStdin) {
+        throw new SandboxError(
+          "NotSupported",
+          "closing stdin is not supported"
+        );
+      }
+      await d.closeStdin();
+    },
+    async writeStdin(data: Uint8Array) {
+      const d = await get();
+      if (!d.writeStdin) {
+        throw new SandboxError("NotSupported", "stdin is not supported");
+      }
+      await d.writeStdin(data);
+    },
+  };
 }

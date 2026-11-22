@@ -1,55 +1,51 @@
 ---
 title: Modal
 icon: modal
-description: Modal sandboxes with streaming exec and first-class GPU. Backed by the modal JS SDK; an App + Image are created lazily.
+description: Modal sandboxes with streaming exec, first-class GPU, native file API and watch, PTY, filesystem snapshots, egress allow lists with header injection, secrets, volumes, regions, browser-safe connect-token previews, and private image builds. Backed by the modal JS SDK (≥ 0.11).
 ---
 
 <ProviderLinks provider="modal" />
 
 ## Installation
 
-`modal` is an optional peer dependency of `sbox-sdk`, loaded lazily on first use.
+`modal` (≥ 0.11) is an optional peer dependency of `sbox-sdk`, loaded lazily on first use.
 
 ```package-install
 sbox-sdk modal
 ```
 
-## Usage
+## Authentication
+
+<AuthEnv provider="modal" />
+
+Credentials fall back to Modal's standard environment (`MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET`) or `~/.modal.toml` when you omit the options. Sandboxes and template builds attach to the App named `appName` (default `sbox-sdk`), which is created if missing.
+
+## Quickstart
 
 ```ts
 import { createSandboxClient } from "sbox-sdk";
 import { modal } from "sbox-sdk/modal";
 
 const client = createSandboxClient({
-  provider: modal({
-    tokenId: process.env.MODAL_TOKEN_ID,
-    tokenSecret: process.env.MODAL_TOKEN_SECRET,
-    appName: "my-agent", // App is created if missing
-  }),
+  provider: modal({ appName: "my-agent" }),
 });
 
 const sandbox = await client.create({
-  template: "python:3.13", // container image
-  resources: { vcpus: 2, memoryMB: 2048, gpu: "A100" }, // GPU is first-class
+  template: "python:3.13-slim", // registry image, a Modal image id (im-…), or a TemplateRef
+  resources: { vcpus: 2, memoryMB: 2048, gpu: "A100", gpuCount: 1 },
+  lifecycle: { maxAgeMs: 30 * 60_000, idleTimeoutMs: 5 * 60_000 },
+  region: "us-east-1",
+  metadata: { job: "demo" },
 });
 
 for await (const ev of sandbox.commands.run("nvidia-smi")) {
   if (ev.type === "stdout") process.stdout.write(ev.data);
 }
+await sandbox.files.write("/tmp/data.bin", new Uint8Array([0, 1, 2]));
+await sandbox.destroy();
 ```
 
-Credentials fall back to Modal's standard environment (`MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET`) when the options are omitted. [`template`](/templates) is a container image passed to `images.fromRegistry`.
-
-<Callout type="info">
-  Modal's JS SDK has no high-level file API, so `files.read`/`files.write` are
-  implemented via `exec` + `base64` — the image needs coreutils `base64`
-  (present on `python:*`, `debian`, `ubuntu`). Ports must be declared in
-  `spec.ports` at create time before `ports.expose()` can resolve a tunnel.
-</Callout>
-
-## Authentication
-
-<AuthEnv provider="modal" />
+Since 0.11, `create()` blocks until Modal schedules the sandbox, and a lack of capacity throws `QuotaExceeded` (retryable).
 
 ## Options
 
@@ -58,17 +54,71 @@ Credentials fall back to Modal's standard environment (`MODAL_TOKEN_ID` / `MODAL
   name="ModalOptions"
 />
 
+## Templates (image builds)
+
+`client.templates.build()` builds a Modal **Image** in your workspace and publishes it **privately** (`allowPublic: false`) as `sbox-<first 16 hex of the cache key>`, plus your `name` when you set one. That way `lookup(cacheKey)` finds it again and unchanged specs aren't rebuilt.
+
+```ts
+const tpl = await client.templates.build({
+  name: "data-tools",
+  source: {
+    dockerfile: "FROM python:3.12-slim\nRUN pip install numpy pandas\n",
+  },
+  env: { PYTHONUNBUFFERED: "1" },
+  workdir: "/work",
+});
+const sb = await client.create({ template: tpl });
+```
+
+- **Dockerfile:** the JS SDK has no `fromDockerfile`, so the adapter takes the single `FROM` as `images.fromRegistry(base)` and passes the remaining instructions to `dockerfileCommands()`. `env` / `workdir` / `user` become `ENV` / `WORKDIR` / `USER`.
+- **Not supported:** `COPY` or `ADD` from build context (the JS SDK can't upload context; `ADD <url>` and `COPY --from=` are fine), multi-stage builds, and `ARG` before `FROM`. These throw `Validation`. `startCmd` and `readyCmd` don't apply (sandboxes run their own command) and are ignored with a log line.
+- **Other sources:** `image` (with `registryAuth` → a `REGISTRY_USERNAME` / `REGISTRY_PASSWORD` secret) and `snapshot` (a Modal image id from `snapshots.create()`).
+- Modal's builder doesn't stream logs through the JS SDK, so `onEvent` gets status events plus one log line per instruction.
+
+## Previews and browser auth
+
+- Ports listed in `spec.ports` are tunneled at create time (`encryptedPorts`). `ports.expose(port)` returns that public tunnel URL.
+- `ports.expose(port, { visibility: "private" })`, or any port that wasn't declared, returns a **connect token** URL: `auth: { type: "query", param: "_modal_connect_token", token }`. Modal's proxy accepts the token as a query parameter (and then sets a cookie), so it works from a browser and a **WebSocket**: `browserUrl(preview, { protocol: "ws" })`. `flags.previewBrowserAuth` is `true`. Your server receives the verified `X-Verified-User-Data` header.
+
+## Lifecycle
+
+| `SandboxSpec`             | Modal                                                                   |
+| ------------------------- | ----------------------------------------------------------------------- |
+| `lifecycle.maxAgeMs`      | `timeoutMs` (Modal's default is **5 minutes**, so set this)             |
+| `lifecycle.idleTimeoutMs` | `idleTimeoutMs`. Modal always **terminates** on idle (`onIdle` ignored) |
+| `name` / `idempotencyKey` | sandbox `name` (unique per App); a retried create reuses it             |
+| `metadata`                | `tags` (`list()` filters by them on the server)                         |
+
+`getInfo()` calls `poll()` (and `getTags()`). Modal sandboxes can't be stopped or restarted, so a finished sandbox reports `destroyed`. `list()` only returns live sandboxes in the App. `getOrCreate` is native (`sandboxes.fromName`).
+
+## Network, secrets and volumes
+
+- **Egress:** `block-all` → `blockNetwork`. `allow-list` → `outboundCidrAllowlist` + `outboundDomainAllowlist` (a dimension you leave empty gets `[]`). At runtime, `setEgressPolicy` calls `updateNetworkPolicy` (`allow-all` = `["0.0.0.0/0"]` / `["*"]`). Deny rules aren't supported.
+- **Header injection** (`network.inject`) becomes Modal's `ExperimentalOutboundPolicy`. For a `SecretRef` header, `name` is the Modal Secret, and `envVar` (default `name`) is the key inside it. The adapter writes the header value as `$<key>`, and Modal fills it in outside the sandbox. Plain string values are static headers. Runtime updates only work on sandboxes created with an injection policy.
+- **Secrets:** a `SecretRef` without a `value` → `secrets.fromName`. With a value → `secrets.fromObject`. Both are injected as env vars.
+- **Volumes:** `client.volumes` wraps `volumes.fromName` / `delete`, and `list` pages through the control-plane `volumeList`. `spec.volumes` mounts by name or `vo-` id. `readOnly` uses `withMountOptions({ readOnly: true })`.
+
 ## Capabilities
 
-| Capability          |    Level    | Notes                      |
-| ------------------- | :---------: | -------------------------- |
-| `list`              |   native    |                            |
-| `streaming`         |   native    | `ContainerProcess` streams |
-| `filesUpload`       |   native    | via `exec` + base64        |
-| `gpu`               |   native    | `resources.gpu: "A100"`    |
-| `exposePort`        |   native    | declare ports at create    |
-| `codeInterpreter`   | unsupported |                            |
-| `stop` / `pause`    | unsupported | `destroy()` = terminate    |
-| `snapshot` / `fork` | unsupported |                            |
+| Capability                               |    Level    | Notes                                                                      |
+| ---------------------------------------- | :---------: | -------------------------------------------------------------------------- |
+| `list` / `streaming`                     |   native    | stdout and stderr stay separate                                            |
+| `background` / `killProcess` / `stdin`   |   native    | kill = process-tree kill via a pid file under `/tmp/.sbox-proc`            |
+| `pty`                                    |   native    | `exec({ pty: true })`; resize via `stty`; no reattach (`pty.connect`)      |
+| `filesUpload` / `filesWatch`             |   native    | `sandbox.filesystem` (`readBytes`, `writeBytes`, `watch`, …)               |
+| `exposePort` / `privatePreview`          |   native    | tunnels + connect tokens; `previewBrowserAuth: true`                       |
+| `egressControl` / `secretsVault`         |   native    | allow lists, runtime updates, header injection                             |
+| `snapshot`                               |   native    | `snapshotFilesystem()` → image id; restore with `create({ fromSnapshot })` |
+| `volumes` / `templateBuild`              |   native    | sources: `dockerfile`, `image`, `snapshot`                                 |
+| `gpu` / `region`                         |   native    | `"A100"` / `"H100:2"`; `regions: [region]`                                 |
+| `stop` / `pause` / `setTimeout` / `fork` | unsupported | `destroy()` = terminate; pause is experimental (persistent sandboxes only) |
+| `codeInterpreter` / `ssh` / `metrics`    | unsupported |                                                                            |
 
-`previewModel` is `tunnel`.
+Flags: `perCommandEnvCwd: true` (`workdir`/`env` passed natively), `exitCodeNative: true`, `previewBrowserAuth: true`, `previewModel: "tunnel"`.
+
+## Known limitations
+
+- `kill()` needs `/proc`, `grep` and `cut` in the image (any normal Linux image). The core's timeout backstop still applies.
+- `resources.diskMB` and `shmMB` have no Modal equivalent and are ignored.
+- Memory snapshots (`mode: "memory"`) need Modal's experimental snapshot flag at create time and aren't offered.
+- `rename` uses the core's `mv` polyfill (the Modal filesystem API has no move).

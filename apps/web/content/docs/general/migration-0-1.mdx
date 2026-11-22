@@ -1,0 +1,50 @@
+---
+title: Migrating to 0.1
+description: What changed between sbox-sdk 0.0.x and 0.1, and how to update.
+---
+
+0.1 is the first renewal release. Most code keeps working. The deprecated forms below still function in 0.1 and will be removed in 0.2.
+
+## Renamed or moved
+
+| 0.0.x                                | 0.1                                            |
+| ------------------------------------ | ---------------------------------------------- |
+| `create({ ttlMs })`                  | `create({ lifecycle: { maxAgeMs } })`          |
+| `create({ onIdle })`                 | `create({ lifecycle: { onIdle } })`            |
+| `sandbox.snapshots.fork(n)`          | `sandbox.fork({ count: n })` (gated on `fork`) |
+| `sandbox.network.createSsh()`        | `sandbox.ssh.create()` (gated on `ssh`)        |
+| `ports.expose(p, { private: true })` | `ports.expose(p, { visibility: "private" })`   |
+| `preview.token`                      | `preview.auth`                                 |
+| `import "sbox-sdk/codesandbox"`      | `import "sbox-sdk/together"`                   |
+
+## Behavior changes
+
+- `sandbox.resume()` now throws `NotSupportedError` on providers with neither `pause` nor `stop`.
+- `ports.fetch()` no longer exposes a port publicly as a fallback. Expose the port first, or use a provider with `proxiedFetch` / `privatePreview`.
+- `ports.expose(p, { visibility: "private" })` throws on providers without `privatePreview` instead of silently returning a public URL.
+- `commands.run()` with `timeoutMs` now always rejects with a `Timeout` error, even if the provider ignored the timeout.
+- Env var names are validated (`[A-Za-z_][A-Za-z0-9_]*`). Invalid names throw `Validation`.
+- Commands with emulated `cwd` no longer run when `cd` fails.
+- `getInfo().state` is fetched live, so you'll see real states (`paused`, `archived`, …) where you used to get a hard-coded `running`.
+- Capability tables were corrected for every adapter. Many features moved from `unsupported` to `native`, so `sandbox.pty`, `sandbox.ssh` and `sandbox.network` may now be defined where they weren't before.
+
+## Provider packages
+
+| Provider   | Old peer                 | New peer                                    |
+| ---------- | ------------------------ | ------------------------------------------- |
+| Daytona    | `@daytonaio/sdk`         | `@daytona/sdk` (≥ 2)                        |
+| Vercel     | `@vercel/sandbox` 1–2    | `@vercel/sandbox` ≥ 4 (Node ≥ 22.19)        |
+| Cloudflare | `@cloudflare/sandbox` \* | `@cloudflare/sandbox` ~0.12.14 (deprecated) |
+
+## Deprecated adapters
+
+- **Runloop**: the service is winding down. Removed in 0.2.
+- **CodeSandbox**: superseded by Together Sandbox (`sbox-sdk/together`). Removed in 0.2.
+- **Cloudflare**: the 0.x SDK reaches end of life on 2026-12-31. A 1.x adapter is planned.
+- **Morph**: maintenance-only, because the TypeScript SDK is unmaintained upstream.
+
+## New
+
+Templates (`client.templates`, inline `create({ template: spec })`), PTY (`sandbox.pty`), `sandbox.metrics()`, `client.volumes`, `client.verify()`, `client.getOrCreate()`, `connect(id, { resume })`, preview `wsUrl`/`auth` + `browserUrl()`, egress `deny`/`inject`, `resources.shmMB`.
+
+New adapters: `docker`, `superserve`, `tensorlake`, `sprites`, `freestyle`, `together`.

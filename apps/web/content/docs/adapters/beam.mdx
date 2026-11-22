@@ -1,18 +1,31 @@
 ---
 title: Beam Cloud
 icon: beam
-description: A sandbox per Beam Cloud container. Fast, GPU-capable sandboxes with snapshots, via @beamcloud/beam-js.
+description: A sandbox per Beam Cloud container. GPU-capable sandboxes with native streaming exec, processes, filesystem, egress control, brokered secrets, memory snapshots and image builds, via @beamcloud/beam-js.
 ---
 
 <ProviderLinks provider="beam" />
 
 ## Installation
 
-`@beamcloud/beam-js` is an optional peer dependency of `sbox-sdk`, loaded lazily on first use.
+`@beamcloud/beam-js` (1.1 or newer) is an optional peer dependency of `sbox-sdk`, loaded lazily on first use.
 
 ```package-install
 sbox-sdk @beamcloud/beam-js
 ```
+
+## Authentication
+
+<AuthEnv provider="beam" />
+
+The adapter reads `BEAM_TOKEN` and `BEAM_WORKSPACE_ID`, or takes `token` / `workspaceId` options.
+
+<Callout type="warn">
+  `@beamcloud/beam-js` keeps its credentials in a process-wide `beamOpts` object
+  and builds its HTTP client once. Only **one Beam token per process** works. A
+  provider configured with a different token fails with a `Validation` error
+  instead of quietly using the first token.
+</Callout>
 
 ## Usage
 
@@ -28,32 +41,105 @@ const client = createSandboxClient({
 });
 
 const sandbox = await client.create({
-  template: "python:3.12",
-  resources: { vcpus: 2, memoryMB: 2048, gpu: "A10G" }, // GPU is first-class
+  template: "python:3.12-slim", // registry image (Image.fromRegistry)
+  resources: { vcpus: 2, memoryMB: 2048, gpu: "A10G" },
+  lifecycle: { maxAgeMs: 30 * 60_000 }, // Beam TTL (keepWarmSeconds)
+  env: { APP_ENV: "dev" },
+  volumes: [{ id: "weights", mountPath: "/mnt/weights" }],
+  secrets: [{ name: "OPENAI_API_KEY", mode: "egress" }],
+  network: { mode: "allow-list", domains: ["api.openai.com", "*.pypi.org"] },
 });
 
-const res = await sandbox.commands.run("nvidia-smi");
-console.log(res.stdout);
-
-const snap = await sandbox.snapshots!.create();
-const forks = await sandbox.snapshots!.fork(2); // boot 2 from the snapshot
+// stdout and stderr stream separately; cwd/env are native.
+for await (const ev of sandbox.commands.run("nvidia-smi", { cwd: "/tmp" })) {
+  if (ev.type === "stdout") process.stdout.write(ev.data);
+}
 ```
 
-[`template`](/templates) is a base image. Sandboxes are real Linux containers with coreutils.
+### What `create()` maps to
+
+| sbox                                      | Beam                                                                                                     |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `template` (registry ref)                 | `Image.fromRegistry(ref)`                                                                                |
+| `template` (Beam image id / template ref) | `Image.fromId(id)`                                                                                       |
+| `name`                                    | the Beam app name (default `"sbox"`, or the `app` option)                                                |
+| `resources.vcpus` / `memoryMB`            | `cpu` / `memory`                                                                                         |
+| `resources.gpu` / `gpuCount`              | `gpu` / `gpuCount` (`T4`, `L4`, `A10G`, `A100-40`, `A100-80`, `H100`, `A6000`, `RTX4090`, `L40S`, `any`) |
+| `lifecycle.maxAgeMs`, `setTimeout()`      | `keepWarmSeconds` / `updateTtl` (a TTL, default 600s)                                                    |
+| `env`                                     | `env`                                                                                                    |
+| `volumes`                                 | `new Volume(id, mountPath)` (created on first mount)                                                     |
+| `secrets` by name                         | `secrets: [{ name }]` (brokered workspace secrets)                                                       |
+| `secrets` with an inline `value`          | plain env var                                                                                            |
+| `network`                                 | `blockNetwork` / `allowList`                                                                             |
+| `ports`                                   | `ports` (public URLs at creation)                                                                        |
+| `fromSnapshot`                            | `Sandbox.createFromSnapshot` (memory) or `Image.fromId` (filesystem)                                     |
+
+Settings Beam cannot honor throw `Validation` instead of being dropped:
+
+- `lifecycle.idleTimeoutMs`, `onIdle: "pause" | "stop"`, `autoResume` (sandboxes have only a TTL)
+- `region`
+- read-only volume mounts
+- renaming a secret through `envVar`
+- egress `deny` rules and `inject`
+- unknown GPU types
+
+`metadata` has no Beam equivalent. `getInfo()` returns what this process created the sandbox with, and `{}` after `connect()`.
+
+### Secrets and egress
+
+Beam secrets are **brokered**. The sandbox only sees a placeholder, and Beam substitutes the real value in HTTPS headers sent to the hosts the secret allows. Create the secret with its host rules, then pass it by name:
+
+```bash
+beam secret create OPENAI_API_KEY "$OPENAI_API_KEY" --host api.openai.com
+```
+
+```ts
+await client.create({ secrets: [{ name: "OPENAI_API_KEY", mode: "egress" }] });
+```
+
+`network` and `sandbox.network.setEgressPolicy()` map to `blockNetwork` / `allowList` (`updateNetworkPermissions` at runtime). Allow-lists take hostnames, `*.` wildcards, IPs and CIDRs, up to 64 entries. Hostname rules only apply to ports 443 and 80.
+
+## Previews
+
+`sandbox.ports.expose(port)` returns Beam's public URL (`https://<id>-<port>.app.beam.cloud`). `ports.list()` maps to `listUrls()`.
 
 <Callout type="info">
-  exec takes `{ cwd, env }` natively (`perCommandEnvCwd: true`) and the adapter
-  buffers the process streams (`streaming` emulated). The SDK's file helpers are
-  local-path based, so `files.read`/`files.write` go through `exec` + `base64`
-  (binary-safe). Ports are public SSL endpoints (`exposePort`). `snapshots.create()`
-  is `instance.snapshot()` and `fork()` snapshots then boots N sandboxes via
-  `createFromSnapshot` — in-place `restore` is not supported. `setTimeout()` maps
-  to `updateTtl`; `list` isn't exposed by the SDK.
+  Beam sandbox URLs are always **public** (`auth: { type: "public" }`), so
+  `privatePreview` is unsupported and `previewBrowserAuth` is `false`. Add
+  authentication inside your app before exposing anything sensitive.
 </Callout>
 
-## Authentication
+## Snapshots and fork
 
-<AuthEnv provider="beam" />
+- `snapshots.create()` calls `snapshot()`, which captures **memory and filesystem** (`includesMemory: true`). Boot it with `client.create({ fromSnapshot })`. A memory checkpoint restores with its original configuration, so the rest of the spec is ignored.
+- `snapshots.create({ mode: "filesystem" })` calls `createImageFromFilesystem()` and returns an `image:<id>` ref (`includesMemory: false`). Booting it applies the full spec on top of that image.
+- `sandbox.fork({ count })` takes a memory snapshot and boots `count` sandboxes from it.
+
+There is no in-place restore, and no API to list or delete snapshots.
+
+## Templates
+
+`client.templates.build()` builds a Beam image in your workspace:
+
+- `{ dockerfile, context }` runs `Image.fromDockerfile`. The Dockerfile and context are written to a temp directory, and Beam syncs that directory as the build context. This needs Node.
+- `{ image }` runs `Image.fromRegistry`. `registryAuth` is passed as Docker Hub credentials.
+- `env` runs `withEnvs`. `workdir` and `user` become `WORKDIR` / `USER` lines.
+- `startCmd` / `readyCmd` throw `Validation`, because Beam sandboxes boot their own entrypoint.
+
+```ts
+const tpl = await client.templates!.build({
+  source: {
+    dockerfile: "FROM node:22-slim\nRUN npm i -g pnpm\n",
+  },
+});
+const sandbox = await client.create({ template: tpl });
+```
+
+Beam images are content-addressed and have no name or tag. Before building, the adapter calls `exists()`, so an identical image is reused even from another process (`status: "cached"`). `templates.get(id)` resolves Beam image ids. A cache key only resolves in the process that built it. Build logs go to the SDK's own console output, and `onEvent` receives the status changes.
+
+## Code interpreter
+
+`sandbox.code.runCode(code)` runs Python through `runCode` (non-blocking, so output streams to `onStdout` / `onStderr`). A non-zero exit is parsed into `error` (`ValueError: ...`). There is no stateful kernel, and other languages throw `Validation`.
 
 ## Options
 
@@ -64,15 +150,32 @@ const forks = await sandbox.snapshots!.fork(2); // boot 2 from the snapshot
 
 ## Capabilities
 
-| Capability          |    Level    | Notes                               |
-| ------------------- | :---------: | ----------------------------------- |
-| `gpu`               |   native    | `resources.gpu`                     |
-| `snapshot` / `fork` |   native    | `snapshot()` + `createFromSnapshot` |
-| `setTimeout`        |   native    | `updateTtl`                         |
-| `exposePort`        |   native    | public SSL endpoint                 |
-| `filesUpload`       |   native    | via `exec` + base64                 |
-| `streaming`         |  emulated   | buffered process streams            |
-| `list`              | unsupported | not exposed by the SDK              |
-| `pause` / `stop`    | unsupported | `destroy()` = terminate             |
+| Capability                          |    Level    | Notes                                                                    |
+| ----------------------------------- | :---------: | ------------------------------------------------------------------------ |
+| `streaming`                         |   native    | per-process stdout/stderr streams, kept separate                         |
+| `background`                        |   native    | `exec` returns immediately; `commands.connect` reattaches by pid         |
+| `killProcess`                       |   native    | `listProcesses()` + `process.kill()`                                     |
+| `codeInterpreter`                   |   native    | Python `runCode`; no stateful kernel                                     |
+| `egressControl`                     |   native    | `blockNetwork` / `allowList`, `updateNetworkPermissions`                 |
+| `secretsVault`                      |   native    | brokered workspace secrets                                               |
+| `exposePort`                        |   native    | public URLs; `listUrls()`                                                |
+| `snapshot` / `fork`                 |   native    | memory checkpoints; filesystem images                                    |
+| `templateBuild`                     |   native    | `dockerfile`, `image`                                                    |
+| `setTimeout`                        |   native    | `updateTtl`                                                              |
+| `gpu`                               |   native    | `resources.gpu`                                                          |
+| `filesUpload`                       |   native    | `fs.writeBytes`                                                          |
+| `list`                              | unsupported | Beam has no per-sandbox labels to filter by                              |
+| `volumes` (registry)                | unsupported | the SDK has only `Volume.getOrCreate`; mounting via `spec.volumes` works |
+| `pause` / `stop`                    | unsupported | `destroy()` = `terminate()`                                              |
+| `privatePreview`                    | unsupported | sandbox URLs are public                                                  |
+| `pty` / `ssh` / `metrics` / `stdin` | unsupported | not in the sandbox API                                                   |
 
-`perCommandEnvCwd` is `true`; `previewModel` is `subdomain`. In-place snapshot `restore` reports `NotSupported`.
+Flags: `perCommandEnvCwd: true`, `exitCodeNative: true`, `previewModel: "subdomain"`, `templateSources: ["dockerfile", "image"]`.
+
+## Known limitations
+
+- **Idempotency:** Beam has no idempotency key or label lookup. A `create()` that fails after Beam accepted it can leave an orphaned sandbox, which expires at the end of its TTL.
+- **Live state:** `getInfo()` reads the workspace container list (`GET /api/v1/gateway/containers`). A sandbox missing from the list is reported as `destroyed`.
+- **Files:** the native filesystem API covers read, write, list, mkdir, remove and stat. `rename` falls back to `mv` over exec. Writes create missing parent directories.
+- **stdin:** buffered `stdin` is piped through the shell. There is no interactive `writeStdin`.
+- **VMs:** Beam's persistent `VM` API (pause/resume with memory, idle actions, SSH, desktop) is not wrapped yet. Use the `VM` class from `@beamcloud/beam-js` directly for now.

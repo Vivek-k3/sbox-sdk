@@ -1,23 +1,35 @@
 ---
 title: Railway
 icon: railway
-description: A sandbox per Railway sandbox. Ephemeral, isolated Debian Linux VMs with native streaming exec, byte-accurate files, checkpoints and forking.
+description: Isolated Debian Linux VMs on Railway, with streaming exec, real kill, background sessions you can reattach to, native files, checkpoints, forks and preview domains.
 ---
 
 <ProviderLinks provider="railway" />
 
 <Callout type="warn">
-  **Beta.** Railway Sandboxes are a beta product; the SDK surface and behavior
-  may change. Pin the `railway` version and expect occasional breaking changes.
+  **Beta.** Railway Sandboxes are a beta product, so the SDK surface may change.
+  The adapter targets the official `railway` SDK **3.4 or later** (3.17
+  recommended). Versions below 3.0 were an unrelated package.
 </Callout>
 
 ## Installation
 
-`railway` is an optional peer dependency of `sbox-sdk`, loaded lazily on first use.
+`railway` is an optional peer dependency of `sbox-sdk`. It's loaded lazily the first time you create or connect.
 
 ```package-install
 sbox-sdk railway
 ```
+
+## Authentication
+
+<AuthEnv provider="railway" />
+
+The SDK reads credentials from the environment, so all options are optional:
+
+- `RAILWAY_TOKEN`: a **project token**. This is the recommended option, because the environment comes with the token.
+- `RAILWAY_API_TOKEN`: an account or workspace token. It also needs `RAILWAY_ENVIRONMENT_ID` (or the `environmentId` option).
+
+The adapter passes `token`, `authType`, `environmentId` and `endpoint` through to **every** SDK call: create, connect, list, checkpoints and verify.
 
 ## Usage
 
@@ -27,37 +39,99 @@ import { railway } from "sbox-sdk/railway";
 
 const client = createSandboxClient({
   provider: railway({
-    token: process.env.RAILWAY_API_TOKEN!,
-    environmentId: process.env.RAILWAY_ENVIRONMENT_ID!,
+    token: process.env.RAILWAY_TOKEN, // or RAILWAY_API_TOKEN + environmentId
   }),
 });
 
-const sandbox = await client.create({ template: "debian:bookworm" });
+const sandbox = await client.create({
+  env: { NODE_ENV: "production" },
+  resources: { vcpus: 2, memoryMB: 4096 },
+  region: "us-west2",
+  lifecycle: { idleTimeoutMs: 15 * 60_000 }, // destroyed after 15 idle minutes
+  metadata: { team: "agents" },
+});
 
-// exec streams live via the SDK's onStdout/onStderr.
-for await (const ev of sandbox.commands.run("npm install")) {
+// exec streams live, and stdout and stderr stay separate.
+for await (const ev of sandbox.commands.run("npm install", { cwd: "/app" })) {
   if (ev.type === "stdout") process.stdout.write(ev.data);
 }
 
+// Background processes are durable sessions you can reattach to.
+const server = await sandbox.commands.spawn("node server.js");
+const again = await sandbox.commands.connect(server.id); // replays output
+await sandbox.commands.kill(server.id, "SIGTERM");
+
 await sandbox.files.write("/work/data.bin", new Uint8Array([1, 2, 3]));
-const forks = await sandbox.snapshots!.fork(2); // clone the filesystem
+await sandbox.destroy();
 ```
 
-[`template`](/templates) is a base image (or a built template). Each sandbox is an isolated Debian Linux VM provisioned on demand.
+## Templates, checkpoints and forks
 
-<Callout type="info">
-  This is one of the richest adapters: exec streams natively through the SDK's
-  `onStdout`/`onStderr` (`streaming: native`) and returns a real exit code;
-  filesystem is native and byte-accurate (`files.read(path, { format: "bytes" })`
-  / `files.write`). `snapshots.create()` maps to `checkpoint()` and `fork()` to
-  the native `fork()`. Sandboxes are **network-isolated**, so there are no public
-  preview ports (`exposePort` unsupported). Credentials fall back to
-  `RAILWAY_API_TOKEN` / `RAILWAY_ENVIRONMENT_ID`.
-</Callout>
+On Railway, `template` is **not a container image**. It's the name of a **checkpoint**: a saved disk you boot from. Every sandbox starts from Railway's Debian base.
 
-## Authentication
+```ts
+// Save the current disk as a named checkpoint...
+const snap = await sandbox.snapshots!.create({ name: "deps-installed" });
 
-<AuthEnv provider="railway" />
+// ...and boot new sandboxes from it. `template: "deps-installed"` is equivalent.
+const copy = await client.create({ fromSnapshot: snap });
+
+await sandbox.snapshots!.list(); // every checkpoint in the environment
+await sandbox.snapshots!.delete(snap); // looked up by key, deleted by id
+
+const [child] = await sandbox.fork(); // clones the filesystem (a fresh boot)
+```
+
+Checkpoints capture the disk only (`includesMemory: false`). Restoring one boots a new sandbox, so in-place `snapshots.restore()` is not available.
+
+### Building a base: the native recipe builder
+
+Railway has no Dockerfile or registry-image build, so `templateBuild` is **unsupported** and `client.templates` is `undefined`. Instead, Railway builds bases from a recipe, `Sandbox.template()`, and caches the result by recipe hash. To use one, pass it to the factory. It applies to every create that doesn't name a `template` or `fromSnapshot`:
+
+```ts
+import { Sandbox } from "railway";
+import { railway } from "sbox-sdk/railway";
+
+const base = Sandbox.template()
+  .withPackages("git", "python3")
+  .run("pip install uv")
+  .workdir("/app");
+
+const provider = railway({ template: base }); // built once, then cached
+```
+
+## Previews
+
+Railway publishes HTTP domains **at create time**. To get one, declare its ports in `spec.ports`. Domains need the sandbox on the environment's private network, so you must opt in with `networkIsolation: "PRIVATE"`:
+
+```ts
+const client = createSandboxClient({
+  provider: railway({ networkIsolation: "PRIVATE" }),
+});
+const sandbox = await client.create({ ports: [3000] });
+const preview = await sandbox.ports!.expose(3000); // { url, wsUrl, auth: { type: "public" } }
+```
+
+Some limits apply:
+
+- Domains are **public**. There are no private previews, so `privatePreview` is unsupported and `previewBrowserAuth` is `false`.
+- `expose()` of a port you didn't declare throws `Validation`.
+- `unexpose()` is not available.
+
+## Secrets
+
+An env-mode `SecretRef` that has no `value` becomes a Railway reference to the environment's **shared variables**. Railway resolves it inside the sandbox, so the value never passes through your process:
+
+```ts
+await client.create({
+  secrets: [
+    { name: "OPENAI_API_KEY" }, // -> ${{shared.OPENAI_API_KEY}}
+    { name: "db", envVar: "DB_PASSWORD", value: "inline" },
+  ],
+});
+```
+
+Egress-mode (`mode: "egress"`) secrets are not supported.
 
 ## Options
 
@@ -68,15 +142,57 @@ const forks = await sandbox.snapshots!.fork(2); // clone the filesystem
 
 ## Capabilities
 
-| Capability        |    Level    | Notes                   |
-| ----------------- | :---------: | ----------------------- |
-| `list`            |   native    |                         |
-| `streaming`       |   native    | `onStdout` / `onStderr` |
-| `filesUpload`     |   native    | byte-accurate `files.*` |
-| `snapshot`        |   native    | `checkpoint()`          |
-| `fork`            |   native    | clone the filesystem    |
-| `exposePort`      | unsupported | network-isolated VMs    |
-| `codeInterpreter` | unsupported |                         |
-| `pause` / `stop`  | unsupported | `destroy()` = teardown  |
+| Capability                |    Level    | Notes                                                        |
+| ------------------------- | :---------: | ------------------------------------------------------------ |
+| `streaming`               |   native    | `onStdout` / `onStderr`, stderr kept separate                |
+| `background`              |   native    | durable exec sessions; `commands.connect(id)` reattaches     |
+| `killProcess`             |   native    | `ExecHandle.kill(signal)` to the process group               |
+| `stdin`                   |   native    | `spawn()` opens stdin (`process.writeStdin`)                 |
+| `filesUpload`             |   native    | streaming `files.write` / `files.read({ format: "stream" })` |
+| `list`                    |   native    | see limitations                                              |
+| `snapshot`                |   native    | named checkpoints (disk only)                                |
+| `fork`                    |   native    | clones the filesystem                                        |
+| `exposePort`              |   native    | `declaredPorts`: domains from `spec.ports`                   |
+| `region`                  |   native    | `spec.region`                                                |
+| `secretsVault`            |   native    | `${{shared.NAME}}` references                                |
+| `privatePreview`          | unsupported | domains are public                                           |
+| `egressControl`           | unsupported | ISOLATED = public NAT egress; no filtering                   |
+| `pause` / `stop`          | unsupported | `destroy()` tears the VM down                                |
+| `setTimeout`              | unsupported | the idle timeout is fixed at create                          |
+| `templateBuild`           | unsupported | use the native recipe builder (above)                        |
+| `pty` / `ssh` / `metrics` | unsupported |                                                              |
+| `volumes` / `gpu`         | unsupported |                                                              |
+| `codeInterpreter`         | unsupported |                                                              |
 
-`perCommandEnvCwd` is `true`; `previewModel` is `none` (no public ports). In-place snapshot `restore` reports `NotSupported`.
+`perCommandEnvCwd` is `true`, because exec takes `cwd`/`env` natively. `timeoutMs` maps to the SDK's `timeoutSec`.
+
+### How the spec maps
+
+| sbox                           | Railway                                                         |
+| ------------------------------ | --------------------------------------------------------------- |
+| `template` / `fromSnapshot`    | `Sandbox.create(checkpointName, …)`                             |
+| `env`                          | `env` (Railway references allowed)                              |
+| `resources.vcpus` / `memoryMB` | `resources.cpu` / `resources.memoryGB` (decimal GB)             |
+| `region`                       | `region`                                                        |
+| `lifecycle.idleTimeoutMs`      | `idleTimeoutMinutes` (rounded up; idle sandboxes are destroyed) |
+| `ports`                        | `domains` (needs `networkIsolation: "PRIVATE"`)                 |
+| `metadata` / `name`            | JSON file at `/etc/sbox/metadata.json` in the sandbox           |
+| `idempotencyKey`               | stored in the same file; a retried create reuses the sandbox    |
+
+The following settings throw `Validation`:
+
+- `lifecycle.maxAgeMs` (Railway has no wall-clock limit)
+- `onIdle: "pause" | "stop"`
+- a `network` policy other than `allow-all`
+- `volumes`
+- `resources.gpu`
+
+`diskMB` and `shmMB` are ignored.
+
+## Known limitations
+
+- **No native labels.** `metadata` and `name` live in a small file inside the sandbox. So `getInfo()` and `list()` read that file for running sandboxes (cached per process), and `list()` costs one connect and one read for each running sandbox it hasn't seen yet. Sandboxes that aren't running report empty metadata.
+- **`list()` returns one page.** The SDK's `Sandbox.list()` exposes no cursor, so the adapter can't paginate beyond the server's default page.
+- **`snapshots.list()` is environment-wide.** Railway checkpoints don't record their source sandbox. The list also includes the checkpoints that recipe builds produce, keyed by recipe hash.
+- **No runtime TTL changes.** To reset the idle countdown, use `sandbox.raw().heartbeat()`.
+- **Foreground `commands.run()` has no `writeStdin`.** Its stdin closes immediately. Use `spawn()` for interactive input. Buffered `stdin` in options works everywhere.

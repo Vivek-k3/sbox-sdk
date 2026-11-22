@@ -1,14 +1,14 @@
 ---
 title: Blaxel
 icon: blaxel
-description: A sandbox per Blaxel instance. The "perpetual sandbox" — stays in standby indefinitely and resumes in sub-25ms, via @blaxel/core.
+description: Perpetual sandboxes that drop into standby when idle and resume with memory intact. Native streaming exec, snapshots, fork, egress control, private previews and image builds, via @blaxel/core.
 ---
 
 <ProviderLinks provider="blaxel" />
 
 ## Installation
 
-`@blaxel/core` is an optional peer dependency of `sbox-sdk`, loaded lazily on first use.
+`@blaxel/core` (0.3 or newer) is an optional peer dependency of `sbox-sdk`, loaded lazily on first use.
 
 ```package-install
 sbox-sdk @blaxel/core
@@ -24,33 +24,105 @@ const client = createSandboxClient({
   provider: blaxel({
     apiKey: process.env.BL_API_KEY!,
     workspace: process.env.BL_WORKSPACE!,
+    region: "us-pdx-1",
   }),
 });
 
-const sandbox = await client.create({ template: "blaxel/prod-base:latest" });
-const res = await sandbox.commands.run("node --version");
-console.log(res.stdout);
+const sandbox = await client.create({
+  env: { NODE_ENV: "development" },
+  lifecycle: { maxAgeMs: 2 * 60 * 60_000 }, // deleted 2h after creation
+  metadata: { team: "agents" },
+});
 
-// Public preview URL for a port (pass { private: true } for a signed one).
-const preview = await sandbox.ports!.expose(3000);
-console.log(preview.url);
+// stdout and stderr stream separately; cwd/env/timeout are native.
+for await (const ev of sandbox.commands.run("npm test", { cwd: "/app" })) {
+  if (ev.type === "stdout") process.stdout.write(ev.data);
+}
 ```
 
-[`template`](/templates) is the sandbox image. There's no explicit pause/resume — Blaxel keeps the sandbox in standby and resumes it in sub-25ms on the next request; `destroy()` removes it.
+[`template`](/templates) is the sandbox image (default `blaxel/base-image:latest`). A sandbox without a `name` gets one derived from the create call's idempotency key, so a retried `create()` returns the same sandbox instead of a duplicate.
 
-<Callout type="info">
-  exec is the buffered `process.exec({ waitForCompletion: true })` (`streaming`
-  emulated); it has no per-command env (only a working dir), so the core folds
-  cwd+env into a `cd … && KEY=v …` wrapper (`perCommandEnvCwd: false`).
-  Filesystem read/write use the binary-safe `fs.readBinary` / `fs.writeBinary`;
-  `rm`/`mv`/`stat` aren't in the SDK surface, so the core polyfills them via
-  exec. Preview URLs can be public or private (`privatePreview`). Credentials
-  fall back to Blaxel's standard environment (`BL_API_KEY` / `BL_WORKSPACE`).
-</Callout>
+### Lifecycle
+
+Blaxel puts an idle sandbox into standby by itself and resumes it (memory, processes and files intact) on the next request, so there is no explicit `pause()`.
+
+| sbox                                            | Blaxel                                            |
+| ----------------------------------------------- | ------------------------------------------------- |
+| `lifecycle.maxAgeMs` / `setTimeout()`           | `ttl` (maximum age, minimum 5 minutes)            |
+| `lifecycle.idleTimeoutMs` + `onIdle: "destroy"` | `ttl-idle` expiration policy (minimum 60 seconds) |
+| `onIdle: "pause"`                               | the platform default (automatic standby)          |
+| `stop()`                                        | `archive()`: filesystem kept, memory dropped      |
+| `client.connect(id)`                            | unarchives an archived sandbox                    |
+| `destroy()`                                     | `delete()`                                        |
+
+### Snapshots and fork
+
+Blaxel snapshots capture memory and running processes (`includesMemory: true`). `snapshots.restore()` rolls the sandbox back **in place** (same name and URLs), and `client.create({ fromSnapshot })` forks a snapshot into a new sandbox. `sandbox.fork()` copies the live state without leaving a snapshot behind.
+
+```ts
+const snap = await sandbox.snapshots!.create({ name: "after-install" });
+const [copy] = await sandbox.fork();
+await sandbox.snapshots!.restore(snap);
+```
+
+### Egress control
+
+`network` at create time and `sandbox.network.setEgressPolicy()` at runtime map to Blaxel's egress proxy: `allow-list` → `proxy.allowedDomains`, `deny` → `proxy.forbiddenDomains`, `block-all` → `forbiddenDomains: ["*"]`. Credential injection (`inject`) becomes proxy routing rules with `{{SECRET:name}}` references, so the secret never enters the sandbox.
+
+```ts
+const sandbox = await client.create({
+  network: {
+    mode: "allow-list",
+    domains: ["api.github.com", "registry.npmjs.org"],
+    inject: [
+      {
+        domains: ["api.github.com"],
+        headers: { Authorization: { name: "gh", value: `Bearer ${token}` } },
+      },
+    ],
+  },
+});
+```
+
+When a create-time policy restricts traffic, the adapter also turns on the `proxy` firewall ruleset so tools that ignore `HTTP(S)_PROXY` are filtered too. Rulesets can only be set at creation; pass `egressFirewall: false` to skip it. Rules are domain-based: CIDR rules throw a `Validation` error.
+
+## Previews and browser auth
+
+`sandbox.ports.expose(port)` creates a Blaxel preview. A private preview (`{ visibility: "private" }`) comes back with a fresh preview token as query auth (`bl_preview_token`), so `browserUrl()` gives a URL a browser can open, including over a WebSocket (`previewBrowserAuth: true`). Tokens live for 24 hours by default (`previewTokenTtlMs`).
+
+```ts
+import { browserUrl } from "sbox-sdk";
+
+const preview = await sandbox.ports!.expose(3000, { visibility: "private" });
+const wsUrl = browserUrl(preview, { protocol: "ws", path: "/socket" });
+```
+
+`sandbox.ports.fetch(port, path)` goes through Blaxel's authenticated port proxy (`proxiedFetch`), so it needs no preview at all.
+
+## Templates
+
+`client.templates.build()` builds an image in your workspace with Blaxel's `ImageInstance` builder. A build deploys a sandbox named after the template; the result's `id` is the image reference to pass as `template`. The build is tagged with its cache key, so the same spec is never rebuilt.
+
+```ts
+const tpl = await client.templates!.build({
+  source: {
+    dockerfile: `FROM node:22-slim
+RUN apt-get update && apt-get install -y git
+WORKDIR /app
+COPY package.json /app/package.json`,
+    context: "./my-app",
+  },
+});
+const sandbox = await client.create({ template: tpl });
+```
+
+There is no Dockerfile endpoint in the SDK, so the adapter translates the Dockerfile into builder calls: `FROM`, `RUN`, `ENV`, `WORKDIR`, `USER`, `EXPOSE`, `ARG`, `LABEL` and `COPY`/`ADD` from the context are supported. Multi-stage builds, `COPY --from` and `ADD <url>` are rejected. `CMD` and `ENTRYPOINT` are skipped (with a log line), because Blaxel's sandbox API must stay the entrypoint. `{ image }` sources (with optional `registryAuth`) build from a registry image directly. Building with a context needs Node (files are staged on disk).
 
 ## Authentication
 
 <AuthEnv provider="blaxel" />
+
+Credentials passed as options go to the SDK's `initialize()`; nothing is written to `process.env`. Without options the SDK reads `BL_API_KEY` / `BL_WORKSPACE` or the Blaxel CLI login. `initialize()` is process-wide, so two `blaxel()` providers with different credentials in one process share the last one configured.
 
 ## Options
 
@@ -61,16 +133,28 @@ console.log(preview.url);
 
 ## Capabilities
 
-| Capability          |    Level    | Notes                       |
-| ------------------- | :---------: | --------------------------- |
-| `list`              |   native    |                             |
-| `exposePort`        |   native    | preview URLs                |
-| `privatePreview`    |   native    | signed (`public: false`)    |
-| `region`            |   native    | chosen at create            |
-| `volumes`           |   native    | mounted at create           |
-| `filesUpload`       |   native    | `fs.writeBinary`            |
-| `streaming`         |  emulated   | exec waits for completion   |
-| `pause` / `stop`    | unsupported | standby/resume is automatic |
-| `snapshot` / `fork` | unsupported |                             |
+| Capability                                       |    Level    | Notes                                                  |
+| ------------------------------------------------ | :---------: | ------------------------------------------------------ |
+| `list`                                           |   native    | paginated, filtered by labels                          |
+| `stop`                                           |   native    | archive; `connect()` unarchives                        |
+| `setTimeout`                                     |   native    | `updateTtl` (min 5m)                                   |
+| `pause`                                          | unsupported | standby/resume is automatic                            |
+| `streaming` / `background` / `killProcess`       |   native    | `process.exec` callbacks, `streamLogs`, `process.kill` |
+| `stdin`                                          |   native    | spawned processes (`writeStdin`)                       |
+| `filesUpload` / `filesWatch`                     |   native    | `fs.writeBinary`, `fs.watch`                           |
+| `exposePort` / `privatePreview` / `proxiedFetch` |   native    | previews + tokens, `sandbox.fetch`                     |
+| `egressControl`                                  |   native    | egress proxy, `updateNetwork`                          |
+| `snapshot` / `fork`                              |   native    | memory included                                        |
+| `volumes` / `region`                             |   native    |                                                        |
+| `templateBuild`                                  |   native    | `dockerfile`, `image`                                  |
+| `codeInterpreter` / `pty` / `ssh` / `metrics`    | unsupported | use [`raw()`](/escape-hatch)                           |
+| `secretsVault` / `gpu`                           | unsupported | inline `secrets` become secret env vars                |
 
-`perCommandEnvCwd` is `false` (core wraps); `preservesMemoryOnPause` is `true` (standby); `previewModel` is `subdomain`.
+`perCommandEnvCwd` is `true`; `preservesDiskOnStop` and `preservesMemoryOnPause` (standby) are `true`; `previewModel` is `subdomain`.
+
+## Known limitations
+
+- `writeStdin` works on `commands.spawn()` processes; `commands.run()` doesn't open a stdin pipe, and there is no way to send EOF.
+- `secrets` need an inline `value` (they become secret env vars); Blaxel has no named secret store for sandboxes.
+- `onIdle: "stop"` has no Blaxel equivalent (expiration policies can only delete), so it falls back to standby.
+- A template build leaves its build sandbox deployed in your workspace (it idles in standby).

@@ -20,6 +20,7 @@ export type TelemetryEventName =
   | "sandbox_destroy"
   | "client_dispose"
   | "sandbox_list"
+  | "template_build"
   | "command_run";
 
 export interface TelemetryReporter {

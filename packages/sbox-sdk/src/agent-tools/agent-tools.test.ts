@@ -18,7 +18,7 @@ describe("createSandboxTools — capability gating", () => {
     const names = createSandboxTools(sandbox)
       .map((t) => t.name)
       .toSorted();
-    // memory(): codeInterpreter + egressControl unsupported -> those tools absent;
+    // memory(): codeInterpreter unsupported -> sbox_run_code absent; egressControl native -> sbox_set_egress present;
     // exposePort (emulated) + snapshot (native) -> present.
     expect(names).toEqual(
       [
@@ -30,10 +30,10 @@ describe("createSandboxTools — capability gating", () => {
         "sbox_fs_write",
         "sbox_lifecycle",
         "sbox_snapshot",
+        "sbox_set_egress",
       ].toSorted()
     );
     expect(names).not.toContain("sbox_run_code");
-    expect(names).not.toContain("sbox_set_egress");
   });
 
   it("honors `only` and `forbid`", async () => {
@@ -112,7 +112,7 @@ describe("plugin system", () => {
     const sandbox = await client.create();
     // typed: sandbox.tools is ToolSpec[] via plugin inference
     expect(Array.isArray(sandbox.tools)).toBe(true);
-    expect(sandbox.tools.length).toBe(8);
+    expect(sandbox.tools.length).toBe(9);
   });
 
   it("throws on a second ai-provider plugin", () => {

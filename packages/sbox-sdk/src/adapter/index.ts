@@ -23,6 +23,7 @@ export type {
   CallContext,
   MaybePromise,
   SandboxSpec,
+  ResolvedSandboxSpec,
   SandboxInfo,
   SandboxState,
   ResourceSpec,
@@ -45,7 +46,24 @@ export type {
   RichResult,
   CodeExecution,
   SnapshotRef,
+  SnapshotOptions,
   ListFilter,
+  LifecyclePolicy,
+  PreviewAuth,
+  EgressRule,
+  EgressInjection,
+  DriverPty,
+  DriverTemplates,
+  DriverVolumes,
+  PtyOptions,
+  TemplateSpec,
+  TemplateSource,
+  TemplateContext,
+  TemplateRef,
+  TemplateBuildEvent,
+  VolumeSpec,
+  VolumeInfo,
+  SandboxMetrics,
 } from "../internal/types.js";
 
 // ---- capability helpers + types ----
@@ -55,6 +73,7 @@ export {
   freezeCapabilities,
   isCapable,
   assertCapability,
+  resolveFlags,
 } from "../internal/capabilities.js";
 export type {
   CapabilityMap,
@@ -63,6 +82,9 @@ export type {
   CapabilityFlags,
   Capabilities,
   PreviewModel,
+  ResolvedCapabilityFlags,
+  TemplateSourceKind,
+  EgressMode,
 } from "../internal/capabilities.js";
 
 // ---- error taxonomy ----
@@ -88,7 +110,37 @@ export {
   parseLsOutput,
   parseStatOutput,
   EXIT_MARKER,
+  assertEnvKeys,
 } from "../internal/shell.js";
+
+// ---- template helpers (cache key, context loading, tar, Dockerfile parse) ----
+export {
+  templateCacheKey,
+  loadTemplateContext,
+  tarContext,
+  parseDockerfile,
+  defaultTemplateName,
+} from "../internal/templates.js";
+export type { DockerInstruction } from "../internal/templates.js";
+
+// ---- naming (emulated get-or-create) ----
+export { SBOX_NAME_KEY } from "../internal/constants.js";
+
+// ---- Dockerfile instruction helpers (for step-list template builders) ----
+export {
+  argList,
+  joinPath,
+  parseEnvArgs,
+  resolveCopy,
+  shellForm,
+  splitFlags,
+  splitShellWords,
+  substituteArgs,
+} from "../internal/dockerfile.js";
+export type { ResolvedCopy } from "../internal/dockerfile.js";
+
+// ---- preview helpers ----
+export { normalizePreview, browserUrl } from "../internal/preview.js";
 export type { BuiltExec } from "../internal/shell.js";
 
 // ---- runtime probe ----

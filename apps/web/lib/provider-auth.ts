@@ -64,7 +64,6 @@ export const PROVIDER_AUTH: Record<string, ProviderAuth> = {
       },
     ],
   },
-
   beam: {
     notes:
       "Token and workspace fall back to the standard Beam environment when the options are omitted.",
@@ -90,7 +89,6 @@ export const PROVIDER_AUTH: Record<string, ProviderAuth> = {
       },
     ],
   },
-
   blaxel: {
     notes:
       "Falls back to Blaxel's standard environment (BL_API_KEY / BL_WORKSPACE) when the options are omitted.",
@@ -116,7 +114,6 @@ export const PROVIDER_AUTH: Record<string, ProviderAuth> = {
       },
     ],
   },
-
   cloudflare: {
     notes:
       "Cloudflare runs inside a Worker; authorization is the binding configured in wrangler.toml, not an environment variable.",
@@ -131,14 +128,13 @@ export const PROVIDER_AUTH: Record<string, ProviderAuth> = {
       },
       {
         description:
-          "Your Worker's domain — required to build preview URLs for exposed ports.",
+          "Deprecated and ignored: previews now use `sandbox.tunnels` (set `namedTunnels: true` for tunnels on your own zone).",
         env: null,
         option: "hostname",
         required: false,
       },
     ],
   },
-
   codesandbox: {
     summary: "A single API key.",
     vars: [
@@ -157,7 +153,6 @@ export const PROVIDER_AUTH: Record<string, ProviderAuth> = {
       },
     ],
   },
-
   daytona: {
     summary: "A single API key (plus an optional region).",
     vars: [
@@ -181,7 +176,19 @@ export const PROVIDER_AUTH: Record<string, ProviderAuth> = {
       },
     ],
   },
-
+  docker: {
+    notes:
+      "No account or key: the adapter talks to the local Docker Engine socket. Discovery order: DOCKER_HOST, OrbStack, /var/run/docker.sock, Docker Desktop, Colima, Rancher Desktop, Podman.",
+    summary: "No credentials: a local Docker-compatible daemon.",
+    vars: [
+      {
+        description: "Daemon socket (unix:// or tcp://). Overrides discovery.",
+        env: "DOCKER_HOST",
+        option: "socketPath",
+        required: false,
+      },
+    ],
+  },
   e2b: {
     summary: "A single API key.",
     vars: [
@@ -199,7 +206,6 @@ export const PROVIDER_AUTH: Record<string, ProviderAuth> = {
       },
     ],
   },
-
   fly: {
     summary: "An API token + the target app name.",
     vars: [
@@ -242,12 +248,21 @@ export const PROVIDER_AUTH: Record<string, ProviderAuth> = {
       },
     ],
   },
-
+  freestyle: {
+    summary: "A Freestyle API key.",
+    vars: [
+      {
+        description: "Freestyle API key.",
+        env: "FREESTYLE_API_KEY",
+        option: "apiKey",
+        required: true,
+      },
+    ],
+  },
   memory: {
     summary: "No credentials — runs in-process.",
     vars: [],
   },
-
   modal: {
     notes:
       "Credentials fall back to the standard Modal environment (MODAL_TOKEN_ID / MODAL_TOKEN_SECRET) when the options are omitted.",
@@ -286,7 +301,6 @@ export const PROVIDER_AUTH: Record<string, ProviderAuth> = {
       },
     ],
   },
-
   morph: {
     notes:
       "Morph is snapshot-first: pass a snapshot id as `template` to boot it directly, or any other value as an image to snapshot first.",
@@ -331,7 +345,6 @@ export const PROVIDER_AUTH: Record<string, ProviderAuth> = {
       },
     ],
   },
-
   northflank: {
     summary: "An API token + the project the sandbox services live in.",
     vars: [
@@ -369,7 +382,6 @@ export const PROVIDER_AUTH: Record<string, ProviderAuth> = {
       },
     ],
   },
-
   railway: {
     notes:
       "Token and environment id fall back to RAILWAY_API_TOKEN / RAILWAY_ENVIRONMENT_ID when the options are omitted.",
@@ -396,7 +408,6 @@ export const PROVIDER_AUTH: Record<string, ProviderAuth> = {
       },
     ],
   },
-
   runloop: {
     summary: "A single API key.",
     vars: [
@@ -420,29 +431,82 @@ export const PROVIDER_AUTH: Record<string, ProviderAuth> = {
       },
     ],
   },
-
+  sprites: {
+    summary: "A Fly Sprites token.",
+    vars: [
+      {
+        description: "Sprites API token.",
+        env: "SPRITES_TOKEN",
+        option: "token",
+        required: true,
+      },
+    ],
+  },
+  superserve: {
+    notes: "The region is derived from the key prefix unless `baseUrl` is set.",
+    summary: "A Superserve API key.",
+    vars: [
+      {
+        description: "Superserve API key.",
+        env: "SUPERSERVE_API_KEY",
+        option: "apiKey",
+        required: true,
+      },
+    ],
+  },
+  tensorlake: {
+    summary: "A project-scoped Tensorlake API key.",
+    vars: [
+      {
+        description: "Tensorlake API key.",
+        env: "TENSORLAKE_API_KEY",
+        option: "apiKey",
+        required: true,
+      },
+      {
+        description: "Project id, only needed for client.volumes.",
+        env: "TENSORLAKE_PROJECT_ID",
+        option: "projectId",
+        required: false,
+      },
+    ],
+  },
+  together: {
+    notes:
+      "Together Sandbox is allowlist-only; request access from Together AI.",
+    summary: "A Together AI API key.",
+    vars: [
+      {
+        description: "Together AI API key.",
+        env: "TOGETHER_API_KEY",
+        option: "apiKey",
+        required: true,
+      },
+    ],
+  },
   vercel: {
     notes:
       "When running on Vercel, the @vercel/sandbox SDK can resolve these from the standard environment (e.g. VERCEL_OIDC_TOKEN) automatically — pass them explicitly anywhere else.",
-    summary: "An access token plus the team and project ids.",
+    summary:
+      "An access token plus team and project ids, or a VERCEL_OIDC_TOKEN (all three options are then optional).",
     vars: [
       {
-        description: "Vercel access token, or an OIDC token.",
+        description: "Vercel access token.",
         env: "VERCEL_TOKEN",
         option: "token",
-        required: true,
+        required: false,
       },
       {
         description: "The team that owns the project.",
         env: "VERCEL_TEAM_ID",
         option: "teamId",
-        required: true,
+        required: false,
       },
       {
         description: "The project to associate sandboxes with.",
         env: "VERCEL_PROJECT_ID",
         option: "projectId",
-        required: true,
+        required: false,
       },
     ],
   },

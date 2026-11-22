@@ -1,0 +1,53 @@
+---
+title: Previews & browser access
+description: Expose a sandbox port as https/wss URLs, choose public or private access, and open private previews from a browser (including WebSockets).
+---
+
+```ts
+const http = await sandbox.ports!.expose(7000);
+const vnc = await sandbox.ports!.expose(6080, { visibility: "private" });
+
+http.url; // https://...
+http.wsUrl; // wss://... (same route; filled in for every provider)
+vnc.auth; // how a client must authenticate (see below)
+```
+
+## The auth model
+
+Every `Preview` carries an `auth` field:
+
+| `auth.type`  | What the client must do                     | Browser + WebSocket?                           |
+| ------------ | ------------------------------------------- | ---------------------------------------------- |
+| `public`     | Nothing                                     | ✅                                             |
+| `query`      | Add `?<param>=<token>` to the URL           | ✅                                             |
+| `signed-url` | Nothing, the URL already embeds a signature | ✅                                             |
+| `header`     | Send `auth.headers` on every request        | ❌ (browsers can't set headers on a WebSocket) |
+
+`expiresAt` is set when the provider's token or signed URL expires.
+
+## Opening a preview from a browser
+
+`browserUrl()` returns a URL a browser can open with no custom headers. It works for `public`, `query` and `signed-url` previews, and throws `NotSupportedError` for header-only auth.
+
+```ts
+import { browserUrl } from "sbox-sdk";
+
+const vnc = await sandbox.ports!.expose(6080, { visibility: "private" });
+const wsUrl = browserUrl(vnc, { protocol: "ws", path: "/websockify" });
+// → wss://6080-abc.example.dev/websockify?token=...
+```
+
+Before relying on private previews from a browser, check the provider flag:
+
+```ts
+client.capabilities.flags.previewBrowserAuth; // true → private previews work in a browser WebSocket
+```
+
+## Server-side fetch
+
+`sandbox.ports.fetch(port, path, init)` sends a request to a port. It uses the provider's native proxy when there is one. Otherwise it reuses an existing preview (or exposes one _privately_) and attaches the auth for you. It **never** makes a port public as a side effect.
+
+## Visibility
+
+- `visibility: "public"` (default): anyone with the URL.
+- `visibility: "private"`: requires the `privatePreview` capability; otherwise it throws `NotSupportedError`.

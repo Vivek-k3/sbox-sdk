@@ -1,10 +1,19 @@
 ---
 title: Runloop
 icon: runloop
-description: A sandbox per Runloop devbox. AI-focused devboxes with suspend/resume and disk snapshots, via @runloop/api-client.
+description: "Deprecated: a sandbox per Runloop devbox, via @runloop/api-client. Runloop ended customer support on 2026-11-13."
 ---
 
 <ProviderLinks provider="runloop" />
+
+<Callout type="error" title="Deprecated: removal in sbox-sdk 0.2.0">
+  Runloop is winding down. Support for existing customers ended on
+  **2026-11-13**. `sbox-sdk/runloop` is deprecated in 0.1.0 and only gets crash
+  and leak fixes. It will be **removed in 0.2.0**. Calling `runloop()` logs a
+  one-time deprecation warning. Move your workloads to another
+  [adapter](/adapters). Your code shouldn't need changes beyond the import and
+  the factory call.
+</Callout>
 
 ## Installation
 
@@ -13,6 +22,12 @@ description: A sandbox per Runloop devbox. AI-focused devboxes with suspend/resu
 ```package-install
 sbox-sdk @runloop/api-client
 ```
+
+## Authentication
+
+<AuthEnv provider="runloop" />
+
+`runloop()` reads `RUNLOOP_API_KEY` when you don't pass `apiKey`. Check the key with `client.verify()`. It lists one devbox and never creates anything.
 
 ## Usage
 
@@ -24,50 +39,58 @@ const client = createSandboxClient({
   provider: runloop({ apiKey: process.env.RUNLOOP_API_KEY! }),
 });
 
-const sandbox = await client.create({ template: "my-blueprint" });
+const sandbox = await client.create({
+  template: "bpt_123",
+  metadata: { team: "a" },
+});
 const res = await sandbox.commands.run("python --version");
 console.log(res.stdout);
 
-// Snapshot the disk, then fork two fresh devboxes from it.
-const forks = await sandbox.snapshots!.fork(2);
-
-await sandbox.pause(); // suspend — memory preserved
+const forks = await sandbox.fork({ count: 2 }); // snapshot the disk, boot 2 devboxes
+await sandbox.pause(); // suspend: memory preserved
 ```
 
-[`template`](/templates) is a **blueprint id**, or a **snapshot id** (`snp…`) to restore disk state into a new devbox. `create()` polls until the devbox is `running`.
+What `create()` does with your spec:
 
-<Callout type="info">
-  Exec is the buffered `executeSync` (`streaming` emulated); the devbox runs it
-  through a shell, so the core folds `cwd`/`env` into a `cd … && KEY=v …`
-  wrapper (`perCommandEnvCwd: false`). Files use the binary-safe `downloadFile`
-  / `uploadFile` endpoints. `suspend`/`resume` map to `pause()`/`resume()`
-  (memory preserved); `shutdown` is `destroy()`. `snapshots.create()` is
-  `snapshotDisk` and `fork()` snapshots then boots N devboxes — in-place
-  `restore` is not supported (snapshots create new devboxes).
-</Callout>
+- [`template`](/templates) is a **blueprint id**. A **snapshot id** (`snp…`) or `fromSnapshot` restores that disk state into a new devbox instead.
+- `name`, `metadata` and `env` are passed through.
+- It waits with `createAndAwaitRunning`, and throws if the devbox fails to boot.
 
-## Authentication
+## Previews
 
-<AuthEnv provider="runloop" />
+A devbox has a single V2 tunnel that serves every port. `ports.expose(port)` reuses that tunnel, or enables one if there isn't one yet, and returns:
 
-## Options
+```
+https://{port}-{tunnel_key}.tunnel.runloop.ai
+```
 
-<AutoTypeTable
-  path="../../packages/sbox-sdk/src/runloop/index.ts"
-  name="RunloopOptions"
-/>
+`auth` follows the tunnel's mode:
+
+- `open` gives `{ type: "public" }`.
+- `authenticated` gives header auth: `X-Runloop-Tunnel-Authorization: Bearer <auth_token>`. This doesn't work from a browser WebSocket.
+
+`removeTunnel` takes no port, so `unexpose()` only removes the tunnel after the last exposed port is gone.
 
 ## Capabilities
 
-| Capability          |    Level    | Notes                         |
-| ------------------- | :---------: | ----------------------------- |
-| `list`              |   native    |                               |
-| `pause`             |   native    | suspend (memory preserved)    |
-| `streaming`         |  emulated   | `executeSync` is buffered     |
-| `filesUpload`       |   native    | binary `uploadFile`           |
-| `exposePort`        |   native    | tunnel via `enableTunnel`     |
-| `snapshot` / `fork` |   native    | `snapshotDisk`; fork = boot N |
-| `codeInterpreter`   | unsupported |                               |
-| `stop`              | unsupported | `pause` (suspend) / `destroy` |
+| Capability          |    Level    | Notes                                                 |
+| ------------------- | :---------: | ----------------------------------------------------- |
+| `list`              |   native    | walks every cursor page                               |
+| `pause`             |   native    | suspend/resume (memory preserved)                     |
+| `streaming`         |  emulated   | `executeAndAwaitCompletion` returns buffered output   |
+| `filesUpload`       |   native    | binary `uploadFile`, wrapped with `toFile`            |
+| `exposePort`        |   native    | V2 tunnel                                             |
+| `snapshot` / `fork` |   native    | `snapshotDisk`. Fork snapshots, then boots N devboxes |
+| `privatePreview`    | unsupported | the tunnel's auth mode is set when it's created       |
+| `stop`              | unsupported | `pause` (suspend) or `destroy` (shutdown)             |
 
-`perCommandEnvCwd` is `false` (core wraps); `preservesMemoryOnPause` is `true`; `previewModel` is `subdomain`. In-place snapshot `restore` reports `NotSupported`.
+Flags:
+
+- `perCommandEnvCwd: false`: the core adds `cwd`/`env` to the command itself.
+- `preservesMemoryOnPause: true` and `previewModel: "tunnel"`.
+- No in-place snapshot `restore`.
+
+## Known limitations
+
+- `kill()` and `timeoutMs` stop the adapter from waiting and end the command with exit code 137 or a `Timeout` error. The remote process **isn't signalled**, so it keeps running until it finishes on its own.
+- The disk snapshot that `fork()` takes isn't deleted afterwards.

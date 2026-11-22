@@ -19,6 +19,7 @@ const EXPECTED = [
   "sbox_fs_write",
   "sbox_lifecycle",
   "sbox_snapshot",
+  "sbox_set_egress",
 ];
 
 const find = (tools: ReturnType<typeof toLangChainTools>, name: string): any =>

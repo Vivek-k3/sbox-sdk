@@ -1,48 +1,109 @@
 ---
 title: Cloudflare Sandbox
 icon: cloudflare
-description: Cloudflare Sandbox via a Worker / Durable Object binding — a code interpreter, native ports with proxied fetch, and get-or-create semantics. Worker-only.
+description: Cloudflare Sandbox SDK 0.12 through a Worker / Durable Object binding. Deprecated; a 1.0 adapter is planned.
 ---
 
 <ProviderLinks provider="cloudflare" />
+
+<Callout type="warn">
+  **Deprecated.** This adapter targets **`@cloudflare/sandbox` 0.12.x**.
+  Cloudflare gives 0.x bug and security fixes only until **2026-12-31**, and
+  Sandbox SDK 1.0 removed this API. A separate 1.0 adapter is planned. Until
+  then, pin `@cloudflare/sandbox@0.12.14` and the
+  `docker.io/cloudflare/sandbox:0.12.14` image. To plan your move, read
+  Cloudflare's [0.x → 1.0 API
+  map](https://developers.cloudflare.com/sandbox/sdk/migrate/api-map/). The
+  adapter logs a one-time warning the first time you call `cloudflare()`.
+</Callout>
 
 ## Installation
 
 `@cloudflare/sandbox` is an optional peer dependency, used from inside a Cloudflare Worker. The adapter needs the **Durable Object namespace binding** for your exported Sandbox class.
 
 ```package-install
-sbox-sdk @cloudflare/sandbox
+sbox-sdk @cloudflare/sandbox@0.12
 ```
+
+## Authentication
+
+<AuthEnv provider="cloudflare" />
+
+There is no API key: the `env.Sandbox` binding from your wrangler config is the credential. `client.verify()` checks that the SDK loads and that `binding` is a Durable Object namespace. It never touches a sandbox, because getting a stub would instantiate one.
 
 ## Usage
 
-Cloudflare is **Worker-only** — it runs against a live Durable Object binding, not a plain Node process. Pass the binding from your Worker `env`:
+Cloudflare is **Worker-only**. It runs against a live Durable Object binding, not a plain Node process:
 
 ```ts
 import { createSandboxClient } from "sbox-sdk";
 import { cloudflare } from "sbox-sdk/cloudflare";
 
+export { Sandbox } from "@cloudflare/sandbox";
+
 export default {
   async fetch(request: Request, env: Env) {
     const client = createSandboxClient({
       provider: cloudflare({
-        binding: env.Sandbox, // your Durable Object namespace
-        hostname: "my-worker.example.com", // for preview URLs
+        binding: env.Sandbox,
+        sandboxOptions: { transport: "rpc" }, // needed for previews (tunnels)
       }),
     });
 
-    const sandbox = await client.create({ name: "session-42" });
-    const exec = await sandbox.code.runCode("print('hello from the edge')");
-    return Response.json({ logs: exec.logs });
+    const sandbox = await client.create({
+      name: "session-42",
+      env: { NODE_ENV: "production" },
+      lifecycle: { idleTimeoutMs: 10 * 60_000 }, // sleepAfter
+      metadata: { tenant: "acme" }, // container labels
+    });
+
+    const proc = await sandbox.commands.spawn("python -m http.server 8080");
+    const preview = await sandbox.ports!.expose(8080); // *.trycloudflare.com
+    const exec = await sandbox.code!.runCode("print('hello from the edge')");
+    return Response.json({ url: preview.url, logs: exec.logs });
   },
 };
 ```
 
-The base image is defined by your Worker's container config at deploy time, so [`template`](/templates) is ignored. `create()` uses `name` (or the idempotency key) as the Durable Object id, giving **get-or-create** semantics. `list` is unsupported.
+`create()` uses `name` (or the idempotency key) as the Durable Object id, so it has **get-or-create** semantics, and `client.getOrCreate()` is native. It boots the container straight away, so `getInfo()` reports `running`. `getInfo()` reads the live Container state.
 
-## Authentication
+The base image comes from your Worker's container config at deploy time. `template`, `region` and `volumes` therefore throw `Validation`.
 
-<AuthEnv provider="cloudflare" />
+## Previews
+
+`exposePort()` was **deprecated on 2026-06-09**. Previews now use its 0.12 replacement, [`sandbox.tunnels`](https://developers.cloudflare.com/sandbox/sdk/api/tunnels/), which **requires the RPC transport**:
+
+- By default, `ports.expose(port)` opens a **quick tunnel** on a zero-config `https://<random>.trycloudflare.com` URL.
+- With `namedTunnels: true`, it opens a **named tunnel** on your zone instead, at `p<port>-<sandbox id>.<zone>`. This needs `CLOUDFLARE_API_TOKEN` (Tunnel Edit, DNS Edit, Zone Read) in the Worker env.
+
+`unexpose()` destroys the tunnel, and `ports.list()` lists the tunnels. Tunnel URLs are **public**, so `privatePreview` is unsupported and `previewBrowserAuth` is `false`. The service must listen on `0.0.0.0:<port>`. `ports.fetch()` still proxies through `containerFetch()` without a tunnel.
+
+The `hostname` option, which built `exposePort()` URLs, is deprecated and ignored.
+
+## Terminals
+
+`sandbox.pty.create()` opens a new execution session and connects to its terminal through `session.terminal()`, a WebSocket upgrade handled inside the Worker. The PTY id is the session id, so `pty.connect(id)` reattaches, and the container replays its buffer. `kill()` closes the socket. `cmd` is run with `exec` once the shell starts.
+
+## Snapshots
+
+`snapshots.create()` uses `createBackup()`, which writes a squashfs archive of **one directory** (`snapshotDir`, default `/workspace`) to R2. This needs the `BACKUP_BUCKET` binding and R2 credentials that the SDK documents.
+
+- `snapshots.restore(ref)` restores the backup **in place**.
+- `client.create({ fromSnapshot })` restores it into the new sandbox after boot.
+
+The snapshot id is `<backup id>:<dir>`, so the id alone is enough to restore. Backups are filesystem-only (`includesMemory: false`) and expire after `snapshotTtlSeconds` (3 days by default). 0.12 has no backup list or delete API, so `snapshots.list()` and `snapshots.delete()` are not available.
+
+## Egress
+
+`network` and `sandbox.network.setEgressPolicy()` drive the Containers outbound proxy's runtime host lists, `setAllowedHosts()` and `setDeniedHosts()`:
+
+| sbox         | Cloudflare                               |
+| ------------ | ---------------------------------------- |
+| `allow-all`  | allowed `["*"]`, denied `deny.domains`   |
+| `allow-list` | allowed `domains`, denied `deny.domains` |
+| `block-all`  | allowed `[]`, denied `["*"]`             |
+
+Filtering is **by hostname only**. CIDR rules throw `Validation`, and credential injection (`inject`, and `secrets` with `mode: "egress"`) throws `NotSupportedError`. The proxy only sees HTTPS traffic when your Sandbox class sets `interceptHttps = true`, and the container then has to trust Cloudflare's CA. For a hard boundary, also set `enableInternet = false`.
 
 ## Options
 
@@ -53,15 +114,33 @@ The base image is defined by your Worker's container config at deploy time, so [
 
 ## Capabilities
 
-| Capability                               |    Level    | Notes                                      |
-| ---------------------------------------- | :---------: | ------------------------------------------ |
-| `setTimeout`                             |   native    |                                            |
-| `streaming`                              |   native    |                                            |
-| `filesUpload`                            |   native    |                                            |
-| `codeInterpreter` / `statefulKernel`     |   native    | `sandbox.code` is defined                  |
-| `exposePort`                             |   native    | preview via wildcard DNS                   |
-| `proxiedFetch`                           |   native    | `ports.fetch()` proxies through the Worker |
-| `list` / `stop` / `pause` / `background` | unsupported |                                            |
-| `snapshot` / `fork`                      | unsupported |                                            |
+| Capability                               |    Level    | Notes                                                          |
+| ---------------------------------------- | :---------: | -------------------------------------------------------------- |
+| `streaming` / `background`               |   native    | `startProcess` + SSE `streamProcessLogs`                       |
+| `killProcess`                            |   native    | `killProcess(id)`; `run()` is a process too, so `kill()` works |
+| `filesWatch`                             |   native    | `watch()` (inotify over SSE)                                   |
+| `filesUpload`                            |   native    | base64 `readFile` / `writeFile`                                |
+| `pty`                                    |   native    | `session.terminal()`                                           |
+| `codeInterpreter` / `statefulKernel`     |   native    | python, javascript, typescript                                 |
+| `exposePort`                             |   native    | `sandbox.tunnels` (public)                                     |
+| `proxiedFetch`                           |   native    | `containerFetch()`                                             |
+| `egressControl`                          |   native    | allowed/denied host lists                                      |
+| `snapshot`                               |   native    | `createBackup` / `restoreBackup` (one directory)               |
+| `stop`                                   |   native    | the container's disk is discarded                              |
+| `setTimeout`                             |   native    | `setSleepAfter()`, an **idle** timeout                         |
+| `list`                                   | unsupported | Durable Objects are not enumerable                             |
+| `volumes`                                | unsupported | `mountBucket()` mounts a bucket you already have; see below    |
+| `stdin`                                  | unsupported | 0.12 has no stdin API                                          |
+| `pause` / `fork` / `metrics`             | unsupported |                                                                |
+| `privatePreview` / `ssh` / `region`      | unsupported |                                                                |
+| `templateBuild` / `gpu` / `secretsVault` | unsupported |                                                                |
 
-`previewModel` is `wildcardDNS`.
+`perCommandEnvCwd` is `true`, and `timeoutMs` is passed to `startProcess`. `previewModel` is `tunnel`.
+
+## Known limitations
+
+- **No volumes.** `client.volumes` needs provider-level create, list and delete. 0.12 can only mount an existing S3/R2/GCS bucket into a running sandbox, so call `sandbox.raw().mountBucket(bucket, path, options)` directly.
+- **`metadata` is write-only.** It becomes container labels for analytics, and `getInfo()` only echoes what this handle set.
+- **`lifecycle.maxAgeMs` is an idle timeout.** `sleepAfter` is the only timer, so `maxAgeMs` (and `ttlMs`) fall back to it when `idleTimeoutMs` is unset.
+- **`resources` and `ports` are ignored.** The instance type comes from wrangler config, and ports get a tunnel on `expose()`.
+- **Errors crossing the Durable Object RPC boundary can lose their class.** The adapter maps by `code` / `httpStatus` when present, and by message otherwise.

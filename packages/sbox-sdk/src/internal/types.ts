@@ -23,8 +23,11 @@ export type FileBody = string | Uint8Array | ReadableStream<Uint8Array>;
 export type SandboxState =
   | "creating"
   | "running"
+  | "suspending"
   | "paused"
   | "stopped"
+  /** Disk moved to cold storage; slower to bring back than `stopped`. */
+  | "archived"
   | "destroyed"
   | "error"
   | "unknown";
@@ -47,7 +50,11 @@ export interface ResourceSpec {
   vcpus?: number;
   memoryMB?: number;
   diskMB?: number;
+  /** Size of /dev/shm. Chromium needs ~1024. */
+  shmMB?: number;
+  /** GPU type, provider-specific (e.g. "A10G", "H100"). */
   gpu?: string;
+  gpuCount?: number;
 }
 
 export interface VolumeMount {
@@ -57,26 +64,160 @@ export interface VolumeMount {
 }
 
 export interface SecretRef {
+  /** Provider-side secret name (or a label when `value` is given). */
   name: string;
+  /** Inline secret value, for providers that accept one. */
+  value?: string;
+  /** Env var to expose it as (mode "env"). Defaults to `name`. */
   envVar?: string;
+  /**
+   * "env" (default): visible inside the sandbox as an env var.
+   * "egress": never enters the sandbox; injected by the egress proxy
+   * (see `EgressPolicy.inject`). Requires egress credential injection.
+   */
+  mode?: "env" | "egress";
+}
+
+// ---------------------------------------------------------------------------
+// Templates (build-time base images)
+// ---------------------------------------------------------------------------
+
+/** Build context: a local directory path (Node only) or in-memory files. */
+export type TemplateContext = string | Record<string, FileBody>;
+
+/** Exactly one source per template. */
+export type TemplateSource =
+  | {
+      /** Dockerfile contents (not a path). */
+      dockerfile: string;
+      context?: TemplateContext;
+      image?: never;
+      snapshot?: never;
+    }
+  | {
+      /** Registry reference, e.g. "debian:bookworm-slim". */
+      image: string;
+      registryAuth?: { username: string; password: string };
+      dockerfile?: never;
+      snapshot?: never;
+    }
+  | {
+      /** Provider snapshot id used as the template base. */
+      snapshot: string;
+      dockerfile?: never;
+      image?: never;
+    };
+
+export interface TemplateSpec {
+  source: TemplateSource;
+  /** Human alias. Defaults to `sbox-<cacheKey prefix>`. */
+  name?: string;
+  /** Default resources for sandboxes created from this template. */
+  resources?: ResourceSpec;
+  env?: Record<string, string>;
+  workdir?: string;
+  user?: string;
+  /** Long-running process started when a sandbox boots. */
+  startCmd?: string;
+  /** Command that exits 0 once the sandbox is ready. */
+  readyCmd?: string;
+}
+
+export interface TemplateRef {
+  /** The id/alias you pass as `template` at create time. */
+  readonly id: string;
+  readonly name?: string;
+  readonly provider: string;
+  /** Content hash the core computed for this build. */
+  readonly cacheKey?: string;
+  readonly createdAt?: Date;
+  readonly raw: unknown;
+}
+
+export type TemplateBuildEvent =
+  | {
+      type: "status";
+      status: "cached" | "queued" | "building" | "ready" | "failed";
+      message?: string;
+    }
+  | {
+      type: "log";
+      line: string;
+      stream?: "stdout" | "stderr";
+      step?: string;
+    };
+
+export interface TemplateBuildOptions {
+  onEvent?: (event: TemplateBuildEvent) => void;
+  signal?: AbortSignal;
+  /** Rebuild even if a template with the same cache key exists. */
+  force?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Lifecycle
+// ---------------------------------------------------------------------------
+
+export interface LifecyclePolicy {
+  /** Suspend/stop after this much inactivity. */
+  idleTimeoutMs?: number;
+  /** Hard wall-clock limit from creation. */
+  maxAgeMs?: number;
+  /** What happens when the idle timeout (or max age) fires. */
+  onIdle?: "pause" | "stop" | "destroy";
+  /** Wake automatically on inbound traffic / connect. */
+  autoResume?: boolean;
 }
 
 export interface SandboxSpec {
-  /** Build-time base: image / snapshot / blueprint id, provider-specific. */
-  template?: string;
+  /**
+   * Build-time base. A provider template id/alias, a `TemplateRef` from
+   * `client.templates.build()`, or an inline `TemplateSpec` (built on first
+   * use, reused by content hash afterwards).
+   */
+  template?: string | TemplateRef | TemplateSpec;
+  /** Boot from a snapshot instead of a template. */
+  fromSnapshot?: string | SnapshotRef;
   name?: string;
   metadata?: Record<string, string>;
   env?: Record<string, string>;
   resources?: ResourceSpec;
+  lifecycle?: LifecyclePolicy;
+  /** @deprecated use `lifecycle.maxAgeMs`. */
   ttlMs?: number;
+  /** @deprecated use `lifecycle.onIdle`. */
   onIdle?: "pause" | "stop" | "destroy";
   ports?: number[];
+  /**
+   * Default visibility for previews of this sandbox. Some providers (E2B) set
+   * preview privacy per sandbox at creation, not per port.
+   */
+  previewVisibility?: "public" | "private";
   region?: string;
   volumes?: VolumeMount[];
   secrets?: SecretRef[];
+  /** Egress policy applied at creation. */
+  network?: EgressPolicy;
   /** Safe-retry key so create() never spawns duplicate VMs across fallback. */
   idempotencyKey?: string;
+  /** Receives template build events when `template` is an inline spec. */
+  onTemplateEvent?: (event: TemplateBuildEvent) => void;
   signal?: AbortSignal;
+}
+
+/**
+ * What adapters receive in `create()`: the core has already resolved inline
+ * templates, snapshot refs and deprecated aliases.
+ * - `template` is always a plain id string (from `templateRef.id` if built).
+ * - `lifecycle` is normalized; `ttlMs`/`onIdle` mirror it for older adapters.
+ */
+export interface ResolvedSandboxSpec extends Omit<
+  SandboxSpec,
+  "template" | "fromSnapshot" | "onTemplateEvent"
+> {
+  template?: string;
+  templateRef?: TemplateRef;
+  fromSnapshot?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -138,6 +279,8 @@ export interface ExecHandle
   readonly stderr: ReadableStream<Uint8Array>;
   kill(signal?: string): Promise<void>;
   writeStdin(data: string | Uint8Array): Promise<void>;
+  /** Signal EOF on stdin (e.g. so `cat` exits). */
+  closeStdin(): Promise<void>;
 }
 
 export interface Process {
@@ -147,6 +290,7 @@ export interface Process {
   wait(): Promise<ExecResult>;
   kill(signal?: string): Promise<void>;
   writeStdin(data: string | Uint8Array): Promise<void>;
+  closeStdin(): Promise<void>;
 }
 
 export interface ProcessInfo {
@@ -193,23 +337,64 @@ export interface Watcher {
 // Network + code
 // ---------------------------------------------------------------------------
 
+/** How a client must authenticate to a preview URL. */
+export type PreviewAuth =
+  | { type: "public" }
+  /** Token in the query string: works for browsers and WebSockets. */
+  | { type: "query"; param: string; token: string }
+  /** Token in request headers: NOT usable from a browser WebSocket. */
+  | { type: "header"; headers: Record<string, string> }
+  /** Auth already baked into `url`/`wsUrl` (signed URL). */
+  | { type: "signed-url" };
+
 export interface Preview {
+  /** https:// URL for the port. */
   url: string;
   port: number;
+  /** wss:// URL for the same route. Filled by the core when omitted. */
+  wsUrl?: string;
+  /** Auth model. Defaults to public, or header-auth if only `token` is set. */
+  auth?: PreviewAuth;
+  expiresAt?: Date;
+  /** @deprecated read `auth` instead. */
   token?: string;
+}
+
+export interface EgressRule {
+  domains?: string[];
+  cidrs?: string[];
+}
+
+/** Inject credentials into outbound requests; the secret never enters the sandbox. */
+export interface EgressInjection {
+  /** Hostnames (wildcards allowed, e.g. "*.github.com"). */
+  domains: string[];
+  /** Header name -> secret supplying its value. */
+  headers: Record<string, SecretRef | string>;
 }
 
 export interface EgressPolicy {
   mode: "allow-all" | "block-all" | "allow-list";
+  /** Allowed domains when mode is "allow-list". */
   domains?: string[];
+  /** Allowed CIDRs when mode is "allow-list". */
   cidrs?: string[];
+  /** Denied destinations (applies on top of "allow-all"). */
+  deny?: EgressRule;
+  inject?: EgressInjection[];
 }
 
 export interface SshCredentials {
   host: string;
   port: number;
   user: string;
+  /** PEM private key. Empty string when the provider uses a token/password. */
   privateKey: string;
+  /** Password or one-time token, for providers that authenticate that way. */
+  password?: string;
+  /** Ready-to-run command, e.g. `ssh token@host -p 2222`. */
+  command?: string;
+  expiresAt?: Date;
 }
 
 export interface KernelContext {
@@ -233,8 +418,72 @@ export interface SnapshotRef {
   name?: string;
   provider: string;
   createdAt?: Date;
+  /** true = memory + processes captured; false = filesystem only. */
+  includesMemory?: boolean;
   raw: unknown;
 }
+
+export interface SnapshotOptions {
+  name?: string;
+  /** "memory" captures RAM + processes; "filesystem" is disk only. */
+  mode?: "memory" | "filesystem";
+}
+
+// ---------------------------------------------------------------------------
+// PTY
+// ---------------------------------------------------------------------------
+
+export interface PtyOptions {
+  /** Program to run. Defaults to the provider's login shell. */
+  cmd?: string;
+  cols?: number;
+  rows?: number;
+  cwd?: string;
+  env?: Record<string, string>;
+  user?: string;
+}
+
+export interface PtySession extends AsyncIterable<Uint8Array> {
+  readonly id: string;
+  write(data: string | Uint8Array): Promise<void>;
+  resize(cols: number, rows: number): Promise<void>;
+  kill(): Promise<void>;
+  /** Resolves with the exit code when the PTY process ends. */
+  wait(): Promise<{ exitCode: number }>;
+}
+
+// ---------------------------------------------------------------------------
+// Volumes, metrics, verify
+// ---------------------------------------------------------------------------
+
+export interface VolumeInfo {
+  readonly id: string;
+  readonly name?: string;
+  readonly sizeMB?: number;
+  readonly region?: string;
+  readonly createdAt?: Date;
+  readonly raw: unknown;
+}
+
+export interface VolumeSpec {
+  name: string;
+  sizeMB?: number;
+  region?: string;
+}
+
+export interface SandboxMetrics {
+  cpuPercent?: number;
+  memoryUsedMB?: number;
+  memoryTotalMB?: number;
+  diskUsedMB?: number;
+  diskTotalMB?: number;
+  timestamp: Date;
+  raw: unknown;
+}
+
+export type VerifyResult =
+  | { ok: true; provider: string; account?: string }
+  | { ok: false; provider: string; error: SandboxError };
 
 // ---------------------------------------------------------------------------
 // Namespaced sub-APIs (thin facades over the adapter)
@@ -282,16 +531,28 @@ export interface CodeAPI {
   }): Promise<KernelContext>;
 }
 
+export interface ExposeOptions {
+  /** "public" (default) or "private" (auth required, see `Preview.auth`). */
+  visibility?: "public" | "private";
+  /** @deprecated use `visibility: "private"`. */
+  private?: boolean;
+}
+
 export interface PortsAPI {
-  expose(port: number, opts?: { private?: boolean }): Promise<Preview>;
+  expose(port: number, opts?: ExposeOptions): Promise<Preview>;
   unexpose(port: number): Promise<void>;
   list(): Promise<Preview[]>;
   fetch(port: number, path?: string, init?: RequestInit): Promise<Response>;
 }
 
 export interface SnapshotsAPI {
-  create(opts?: { name?: string }): Promise<SnapshotRef>;
+  create(opts?: SnapshotOptions): Promise<SnapshotRef>;
+  /**
+   * Restore IN PLACE. Providers whose restore boots a new sandbox don't
+   * offer this; use `client.create({ fromSnapshot })` instead.
+   */
   restore(ref: SnapshotRef | string): Promise<void>;
+  /** @deprecated use `sandbox.fork()`. */
   fork(count?: number): Promise<Sandbox[]>;
   list(): Promise<SnapshotRef[]>;
   delete(ref: SnapshotRef | string): Promise<void>;
@@ -299,7 +560,32 @@ export interface SnapshotsAPI {
 
 export interface NetworkAPI {
   setEgressPolicy(policy: EgressPolicy): Promise<void>;
+  /** @deprecated use `sandbox.ssh.create()` (gated on the `ssh` cap). */
   createSsh(): Promise<SshCredentials>;
+}
+
+export interface SshAPI {
+  create(): Promise<SshCredentials>;
+}
+
+export interface PtyAPI {
+  create(opts?: PtyOptions): Promise<PtySession>;
+  connect(id: string): Promise<PtySession>;
+}
+
+export interface TemplatesAPI {
+  /** Build (or reuse, by content hash) a template in the user's account. */
+  build(spec: TemplateSpec, opts?: TemplateBuildOptions): Promise<TemplateRef>;
+  get(idOrName: string): Promise<TemplateRef | undefined>;
+  list(): AsyncIterable<TemplateRef>;
+  delete(ref: TemplateRef | string): Promise<void>;
+}
+
+export interface VolumesAPI {
+  create(spec: VolumeSpec): Promise<VolumeInfo>;
+  get(idOrName: string): Promise<VolumeInfo | undefined>;
+  list(): AsyncIterable<VolumeInfo>;
+  delete(ref: VolumeInfo | string): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -324,14 +610,24 @@ export interface Sandbox<
   readonly code: Gated<Caps["codeInterpreter"], CodeAPI>;
   readonly snapshots: Gated<Caps["snapshot"], SnapshotsAPI>;
   readonly network: Gated<Caps["egressControl"], NetworkAPI>;
+  readonly ssh: Gated<Caps["ssh"], SshAPI>;
+  readonly pty: Gated<Caps["pty"], PtyAPI>;
 
   // top-level lifecycle: ALWAYS present, runtime-gated (preserves swap-one-import)
   getInfo(): Promise<SandboxInfo>;
   setTimeout(ttlMs: number): Promise<void>;
   stop(): Promise<void>;
   pause(): Promise<void>;
+  /**
+   * Wake a paused, stopped or archived sandbox (needs `pause` or `stop`).
+   * Check `capabilities.flags.resumeChangesId`: the id may change.
+   */
   resume(): Promise<void>;
   destroy(): Promise<void>;
+  /** Clone this sandbox (memory included where supported). Gated on `fork`. */
+  fork(opts?: { count?: number }): Promise<Sandbox<Caps, Raw>[]>;
+  /** Point-in-time resource usage. Gated on `metrics`. */
+  metrics(): Promise<SandboxMetrics>;
 
   /** Runtime check + type-guard, for dynamically-chosen providers. */
   can<K extends keyof CapabilityMap>(
@@ -368,11 +664,29 @@ export interface SandboxClient<
     spec?: SandboxSpec,
     options?: SandboxCreateOptions
   ): Promise<Sandbox<Caps, Raw> & Ext>;
-  connect(id: string): Promise<Sandbox<Caps, Raw> & Ext>;
+  connect(id: string, opts?: ConnectOptions): Promise<Sandbox<Caps, Raw> & Ext>;
+  /**
+   * Return the sandbox called `spec.name`, creating it if absent. Native on
+   * providers with named sandboxes; emulated via `list()` elsewhere.
+   */
+  getOrCreate(
+    spec: SandboxSpec & { name: string },
+    options?: SandboxCreateOptions
+  ): Promise<Sandbox<Caps, Raw> & Ext>;
   list(filter?: ListFilter): AsyncIterable<SandboxInfo>;
+  /** Cheapest authenticated call: "does this key work?" Never creates. */
+  verify(): Promise<VerifyResult>;
+  readonly templates: Gated<Caps["templateBuild"], TemplatesAPI>;
+  readonly volumes: Gated<Caps["volumes"], VolumesAPI>;
   readonly provider: string;
   readonly capabilities: Capabilities;
   dispose(): Promise<void>;
+}
+
+export interface ConnectOptions {
+  /** Resume the sandbox if it is paused/stopped. */
+  resume?: boolean;
+  signal?: AbortSignal;
 }
 
 export interface RetryPolicy {
@@ -396,7 +710,7 @@ export interface ClientOptions<
   retry?: RetryPolicy;
   hooks?: Hooks;
   fetch?: typeof fetch;
-  /** Opt-in lossy emulations (e.g. fork via snapshot+restore). */
+  /** @deprecated reserved; currently has no effect. */
   emulate?: (keyof CapabilityMap)[];
   defaultMetadata?: Record<string, string>;
   /** Plugins applied to every sandbox this client builds (incl. forks). */
@@ -425,10 +739,52 @@ export interface DriverExec extends AsyncIterable<OutputEvent> {
   readonly pid: Promise<string>;
   kill(signal?: string): Promise<void>;
   writeStdin?(data: Uint8Array): Promise<void>;
+  closeStdin?(): Promise<void>;
 }
 
 export interface DriverProcess extends DriverExec {
   readonly id: string;
+}
+
+/** Adapter-side PTY; the core wraps it into `PtySession`. */
+export interface DriverPty {
+  readonly id: string;
+  readonly output: AsyncIterable<Uint8Array>;
+  write(data: Uint8Array): Promise<void>;
+  resize(cols: number, rows: number): Promise<void>;
+  kill(): Promise<void>;
+  wait(): Promise<number>;
+}
+
+/** Adapter-side template registry. Presence MUST match `templateBuild`. */
+export interface DriverTemplates {
+  /**
+   * Build `spec`. MUST tag the result with `cacheKey` (alias, label or name)
+   * so `lookup(cacheKey)` returns it later. MUST NOT publish anything publicly.
+   */
+  build(
+    spec: TemplateSpec & { cacheKey: string; name: string },
+    opts: {
+      onEvent: (event: TemplateBuildEvent) => void;
+      signal?: AbortSignal;
+    },
+    ctx: CallContext
+  ): MaybePromise<TemplateRef>;
+  /** Look up by cache key, alias or id. Return undefined when absent. */
+  lookup(
+    idOrKey: string,
+    ctx: CallContext
+  ): MaybePromise<TemplateRef | undefined>;
+  list?(ctx: CallContext): AsyncIterable<TemplateRef>;
+  delete?(id: string, ctx: CallContext): MaybePromise<void>;
+}
+
+/** Adapter-side volume registry. Presence MUST match `volumes`. */
+export interface DriverVolumes {
+  create(spec: VolumeSpec, ctx: CallContext): MaybePromise<VolumeInfo>;
+  get(idOrName: string, ctx: CallContext): MaybePromise<VolumeInfo | undefined>;
+  list(ctx: CallContext): AsyncIterable<VolumeInfo>;
+  delete(id: string, ctx: CallContext): MaybePromise<void>;
 }
 
 /** A live adapter-side handle to ONE sandbox. Required methods = common denominator. */
@@ -512,6 +868,10 @@ export interface DriverHandle<Raw = unknown> {
   setEgressPolicy?(policy: EgressPolicy, ctx: CallContext): MaybePromise<void>;
   createSsh?(ctx: CallContext): MaybePromise<SshCredentials>;
 
+  createPty?(opts: PtyOptions, ctx: CallContext): MaybePromise<DriverPty>;
+  connectPty?(id: string, ctx: CallContext): MaybePromise<DriverPty>;
+  getMetrics?(ctx: CallContext): MaybePromise<SandboxMetrics>;
+
   runCode?(
     code: string,
     opts: {
@@ -527,10 +887,7 @@ export interface DriverHandle<Raw = unknown> {
     ctx: CallContext
   ): MaybePromise<KernelContext>;
 
-  snapshot?(
-    opts: { name?: string },
-    ctx: CallContext
-  ): MaybePromise<SnapshotRef>;
+  snapshot?(opts: SnapshotOptions, ctx: CallContext): MaybePromise<SnapshotRef>;
   restoreSnapshot?(ref: string, ctx: CallContext): MaybePromise<void>;
   fork?(count: number, ctx: CallContext): MaybePromise<DriverHandle<Raw>[]>;
   listSnapshots?(ctx: CallContext): MaybePromise<SnapshotRef[]>;
@@ -547,11 +904,23 @@ export interface SandboxProvider<
   readonly flags: CapabilityFlags;
   readonly mapError?: (err: unknown) => SandboxError | undefined;
 
-  create(spec: SandboxSpec, ctx: CallContext): MaybePromise<DriverHandle<Raw>>;
+  create(
+    spec: ResolvedSandboxSpec,
+    ctx: CallContext
+  ): MaybePromise<DriverHandle<Raw>>;
   connect(id: string, ctx: CallContext): MaybePromise<DriverHandle<Raw>>;
+  /** Native get-or-create by name. Optional; the core emulates it via list(). */
+  getOrCreate?(
+    spec: ResolvedSandboxSpec & { name: string },
+    ctx: CallContext
+  ): MaybePromise<DriverHandle<Raw>>;
   list?(
     filter: ListFilter | undefined,
     ctx: CallContext
   ): AsyncIterable<SandboxInfo>;
+  /** Cheapest authenticated call. Resolve on success; throw on bad creds. */
+  verify?(ctx: CallContext): MaybePromise<{ account?: string } | undefined>;
+  readonly templates?: DriverTemplates;
+  readonly volumes?: DriverVolumes;
   dispose?(): MaybePromise<void>;
 }
