@@ -21,6 +21,7 @@ name: Release
 
 permissions:
   contents: write
+  id-token: write
 
 on:
   push:
@@ -69,7 +70,6 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: "24"
-          registry-url: "https://registry.npmjs.org"
           cache: pnpm
 
       - name: Install dependencies
@@ -116,15 +116,15 @@ jobs:
       - name: Publish to npm
         working-directory: packages/sbox-sdk
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           V: ${{ steps.version.outputs.version }}
         # Skip if this version is already on npm, so a re-run after a failure
         # later in the job (e.g. the push-back to main) doesn't die here.
         run: |
+          npm --version
           if npm view "sbox-sdk@$V" version >/dev/null 2>&1; then
             echo "sbox-sdk@$V already published; skipping."
           else
-            npm publish --access public
+            npm publish --provenance --access public
           fi
 
       - name: Commit and tag release
