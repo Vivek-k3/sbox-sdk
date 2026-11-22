@@ -19,7 +19,7 @@ import type {
   Preview,
   SandboxInfo,
   SandboxProvider,
-  SandboxSpec,
+  ResolvedSandboxSpec,
   SandboxState,
   SnapshotRef,
 } from "../adapter/index.js";
@@ -58,6 +58,7 @@ export const RUNLOOP_CAPS = {
   stop: "unsupported",
   streaming: "emulated",
   volumes: "unsupported",
+  templateBuild: "unsupported",
 } as const satisfies CapabilityMap;
 
 export type RunloopCaps = typeof RUNLOOP_CAPS;
@@ -267,7 +268,9 @@ export const runloop = defineProvider<RunloopCaps, DevboxView, RunloopOptions>(
       capabilities: RUNLOOP_CAPS,
       flags: RUNLOOP_FLAGS,
 
-      async create(spec: SandboxSpec): Promise<DriverHandle<DevboxView>> {
+      async create(
+        spec: ResolvedSandboxSpec
+      ): Promise<DriverHandle<DevboxView>> {
         const client = await getClient();
         const tpl = spec.template ?? opts.blueprintId;
         const params: Record<string, unknown> = {

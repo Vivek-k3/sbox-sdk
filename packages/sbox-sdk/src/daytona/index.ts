@@ -23,7 +23,7 @@ import type {
   Preview,
   SandboxInfo,
   SandboxProvider,
-  SandboxSpec,
+  ResolvedSandboxSpec,
   SandboxState,
 } from "../adapter/index.js";
 
@@ -60,6 +60,7 @@ export const DAYTONA_CAPS = {
   stop: "native",
   streaming: "emulated",
   volumes: "unsupported",
+  templateBuild: "unsupported",
 } as const satisfies CapabilityMap;
 
 export type DaytonaCaps = typeof DAYTONA_CAPS;
@@ -339,7 +340,9 @@ export const daytona = defineProvider<
     flags: DAYTONA_FLAGS,
     mapError: mapDaytonaError,
 
-    async create(spec: SandboxSpec): Promise<DriverHandle<DaytonaSandbox>> {
+    async create(
+      spec: ResolvedSandboxSpec
+    ): Promise<DriverHandle<DaytonaSandbox>> {
       const c = await getClient();
       const tpl = spec.template;
       const base =

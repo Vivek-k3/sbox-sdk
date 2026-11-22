@@ -31,7 +31,7 @@ import type {
   Preview,
   SandboxInfo,
   SandboxProvider,
-  SandboxSpec,
+  ResolvedSandboxSpec,
   SandboxState,
 } from "../adapter/index.js";
 
@@ -79,6 +79,7 @@ export const NORTHFLANK_CAPS = {
   stop: "unsupported",
   streaming: "emulated",
   volumes: "unsupported",
+  templateBuild: "unsupported",
 } as const satisfies CapabilityMap;
 
 export type NorthflankCaps = typeof NORTHFLANK_CAPS;
@@ -316,7 +317,7 @@ export const northflank = defineProvider<
     capabilities: NORTHFLANK_CAPS,
     flags: NORTHFLANK_FLAGS,
 
-    async create(spec: SandboxSpec): Promise<DriverHandle<NfRef>> {
+    async create(spec: ResolvedSandboxSpec): Promise<DriverHandle<NfRef>> {
       const client = await getClient();
       const serviceId =
         spec.name ?? `sandbox-${globalThis.crypto.randomUUID().slice(0, 8)}`;

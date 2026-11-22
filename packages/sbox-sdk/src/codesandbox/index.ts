@@ -26,7 +26,7 @@ import type {
   Preview,
   SandboxInfo,
   SandboxProvider,
-  SandboxSpec,
+  ResolvedSandboxSpec,
   SandboxState,
 } from "../adapter/index.js";
 
@@ -62,6 +62,7 @@ export const CODESANDBOX_CAPS = {
   stop: "unsupported",
   streaming: "emulated",
   volumes: "unsupported",
+  templateBuild: "unsupported",
 } as const satisfies CapabilityMap;
 
 export type CodeSandboxCaps = typeof CODESANDBOX_CAPS;
@@ -288,7 +289,7 @@ export const codesandbox = defineProvider<
     capabilities: CODESANDBOX_CAPS,
     flags: CODESANDBOX_FLAGS,
 
-    async create(spec: SandboxSpec): Promise<DriverHandle<CsbSandbox>> {
+    async create(spec: ResolvedSandboxSpec): Promise<DriverHandle<CsbSandbox>> {
       const sdk = await getSdk();
       const id = spec.template ?? opts.templateId;
       const sb = await sdk.sandboxes.create({

@@ -21,7 +21,7 @@ import type {
   Preview,
   SandboxInfo,
   SandboxProvider,
-  SandboxSpec,
+  ResolvedSandboxSpec,
   SandboxState,
 } from "../adapter/index.js";
 
@@ -63,6 +63,7 @@ export const BLAXEL_CAPS = {
   stop: "unsupported",
   streaming: "emulated",
   volumes: "native",
+  templateBuild: "unsupported",
 } as const satisfies CapabilityMap;
 
 export type BlaxelCaps = typeof BLAXEL_CAPS;
@@ -275,7 +276,9 @@ export const blaxel = defineProvider<BlaxelCaps, BlaxelInstance, BlaxelOptions>(
       capabilities: BLAXEL_CAPS,
       flags: BLAXEL_FLAGS,
 
-      async create(spec: SandboxSpec): Promise<DriverHandle<BlaxelInstance>> {
+      async create(
+        spec: ResolvedSandboxSpec
+      ): Promise<DriverHandle<BlaxelInstance>> {
         ensureAuth();
         const mod = await loadBlaxel();
         const name =

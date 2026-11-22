@@ -36,7 +36,7 @@ import type {
   Preview,
   SandboxInfo,
   SandboxProvider,
-  SandboxSpec,
+  ResolvedSandboxSpec,
 } from "../adapter/index.js";
 
 export interface CloudflareOptions {
@@ -72,6 +72,7 @@ export const CLOUDFLARE_CAPS = {
   stop: "unsupported",
   streaming: "native",
   volumes: "unsupported",
+  templateBuild: "unsupported",
 } as const satisfies CapabilityMap;
 
 export type CloudflareCaps = typeof CLOUDFLARE_CAPS;
@@ -374,7 +375,7 @@ export const cloudflare = defineProvider<
     mapError: mapCFError,
 
     async create(
-      spec: SandboxSpec,
+      spec: ResolvedSandboxSpec,
       ctx: CallContext
     ): Promise<DriverHandle<CFSandbox>> {
       // get-or-create: the id IS the name. Use idempotencyKey so retries hit

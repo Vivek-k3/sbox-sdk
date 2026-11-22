@@ -26,7 +26,7 @@ import type {
   Preview,
   SandboxInfo,
   SandboxProvider,
-  SandboxSpec,
+  ResolvedSandboxSpec,
 } from "../adapter/index.js";
 
 export interface ModalOptions {
@@ -65,6 +65,7 @@ export const MODAL_CAPS = {
   stop: "unsupported",
   streaming: "native",
   volumes: "unsupported",
+  templateBuild: "unsupported",
 } as const satisfies CapabilityMap;
 
 export type ModalCaps = typeof MODAL_CAPS;
@@ -253,7 +254,9 @@ export const modal = defineProvider<ModalCaps, ModalSandbox, ModalOptions>(
       flags: MODAL_FLAGS,
       mapError: mapModalError,
 
-      async create(spec: SandboxSpec): Promise<DriverHandle<ModalSandbox>> {
+      async create(
+        spec: ResolvedSandboxSpec
+      ): Promise<DriverHandle<ModalSandbox>> {
         const mod = await loadModal();
         const c = await getClient();
         const svc = c as unknown as {

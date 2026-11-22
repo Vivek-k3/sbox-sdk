@@ -24,7 +24,7 @@ import type {
   Preview,
   SandboxInfo,
   SandboxProvider,
-  SandboxSpec,
+  ResolvedSandboxSpec,
   SandboxState,
 } from "../adapter/index.js";
 
@@ -73,6 +73,7 @@ export const FLY_CAPS = {
   stop: "native",
   streaming: "emulated",
   volumes: "unsupported",
+  templateBuild: "unsupported",
 } as const satisfies CapabilityMap;
 
 export type FlyCaps = typeof FLY_CAPS;
@@ -234,7 +235,7 @@ export const fly = defineProvider<FlyCaps, FlyMachine, FlyOptions>((opts) => {
     capabilities: FLY_CAPS,
     flags: FLY_FLAGS,
 
-    async create(spec: SandboxSpec): Promise<DriverHandle<FlyMachine>> {
+    async create(spec: ResolvedSandboxSpec): Promise<DriverHandle<FlyMachine>> {
       const machine = await api<FlyMachine>("POST", `/apps/${app}/machines`, {
         region: spec.region ?? opts.region,
         config: {

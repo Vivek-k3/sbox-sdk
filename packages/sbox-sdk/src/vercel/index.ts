@@ -25,7 +25,7 @@ import type {
   Preview,
   SandboxInfo,
   SandboxProvider,
-  SandboxSpec,
+  ResolvedSandboxSpec,
   SandboxState,
 } from "../adapter/index.js";
 
@@ -61,6 +61,7 @@ export const VERCEL_CAPS = {
   stop: "unsupported",
   streaming: "native",
   volumes: "unsupported",
+  templateBuild: "unsupported",
 } as const satisfies CapabilityMap;
 
 export type VercelCaps = typeof VERCEL_CAPS;
@@ -310,7 +311,9 @@ export const vercel = defineProvider<VercelCaps, VercelSandbox, VercelOptions>(
         const sb = await Sandbox.get({ ...creds, sandboxId: id } as never);
         return makeHandle(sb as VercelSandbox);
       },
-      async create(spec: SandboxSpec): Promise<DriverHandle<VercelSandbox>> {
+      async create(
+        spec: ResolvedSandboxSpec
+      ): Promise<DriverHandle<VercelSandbox>> {
         const { Sandbox } = await loadVercel();
         const sb = await Sandbox.create({
           ...creds,

@@ -32,7 +32,7 @@ import type {
   Preview,
   SandboxInfo,
   SandboxProvider,
-  SandboxSpec,
+  ResolvedSandboxSpec,
   SnapshotRef,
   ProcessInfo,
 } from "../adapter/index.js";
@@ -69,6 +69,7 @@ export const E2B_CAPS = {
   stop: "unsupported",
   streaming: "native",
   volumes: "unsupported",
+  templateBuild: "unsupported",
 } as const satisfies CapabilityMap;
 
 export type E2BCaps = typeof E2B_CAPS;
@@ -448,7 +449,7 @@ export const e2b = defineProvider<E2BCaps, E2BSandbox, E2BOptions>((opts) => {
       return makeHandle(native as E2BSandbox);
     },
     async create(
-      spec: SandboxSpec,
+      spec: ResolvedSandboxSpec,
       ctx: CallContext
     ): Promise<DriverHandle<E2BSandbox>> {
       const { Sandbox } = await loadE2B();

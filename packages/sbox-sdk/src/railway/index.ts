@@ -21,7 +21,7 @@ import type {
   OutputEvent,
   SandboxInfo,
   SandboxProvider,
-  SandboxSpec,
+  ResolvedSandboxSpec,
   SandboxState,
   SnapshotRef,
 } from "../adapter/index.js";
@@ -61,6 +61,7 @@ export const RAILWAY_CAPS = {
   stop: "unsupported",
   streaming: "native",
   volumes: "unsupported",
+  templateBuild: "unsupported",
 } as const satisfies CapabilityMap;
 
 export type RailwayCaps = typeof RAILWAY_CAPS;
@@ -296,7 +297,9 @@ export const railway = defineProvider<
     capabilities: RAILWAY_CAPS,
     flags: RAILWAY_FLAGS,
 
-    async create(spec: SandboxSpec): Promise<DriverHandle<RailwaySandbox>> {
+    async create(
+      spec: ResolvedSandboxSpec
+    ): Promise<DriverHandle<RailwaySandbox>> {
       const mod = await loadRailway();
       const sb = await mod.Sandbox.create(
         spec.template,

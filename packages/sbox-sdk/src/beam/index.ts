@@ -27,7 +27,7 @@ import type {
   Preview,
   SandboxInfo,
   SandboxProvider,
-  SandboxSpec,
+  ResolvedSandboxSpec,
   SnapshotRef,
 } from "../adapter/index.js";
 
@@ -70,6 +70,7 @@ export const BEAM_CAPS = {
   stop: "unsupported",
   streaming: "emulated",
   volumes: "unsupported",
+  templateBuild: "unsupported",
 } as const satisfies CapabilityMap;
 
 export type BeamCaps = typeof BEAM_CAPS;
@@ -293,7 +294,9 @@ export const beam = defineProvider<BeamCaps, BeamInstance, BeamOptions>(
       capabilities: BEAM_CAPS,
       flags: BEAM_FLAGS,
 
-      async create(spec: SandboxSpec): Promise<DriverHandle<BeamInstance>> {
+      async create(
+        spec: ResolvedSandboxSpec
+      ): Promise<DriverHandle<BeamInstance>> {
         const mod = await configure();
         const image = spec.template ?? opts.image;
         const sandbox = new mod.Sandbox({

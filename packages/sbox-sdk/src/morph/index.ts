@@ -30,7 +30,7 @@ import type {
   Preview,
   SandboxInfo,
   SandboxProvider,
-  SandboxSpec,
+  ResolvedSandboxSpec,
   SandboxState,
   SnapshotRef,
 } from "../adapter/index.js";
@@ -72,6 +72,7 @@ export const MORPH_CAPS = {
   stop: "unsupported",
   streaming: "emulated",
   volumes: "unsupported",
+  templateBuild: "unsupported",
 } as const satisfies CapabilityMap;
 
 export type MorphCaps = typeof MORPH_CAPS;
@@ -280,7 +281,9 @@ export const morph = defineProvider<MorphCaps, MorphInstance, MorphOptions>(
       capabilities: MORPH_CAPS,
       flags: MORPH_FLAGS,
 
-      async create(spec: SandboxSpec): Promise<DriverHandle<MorphInstance>> {
+      async create(
+        spec: ResolvedSandboxSpec
+      ): Promise<DriverHandle<MorphInstance>> {
         const client = await getClient();
         const tpl = spec.template;
         // A snapshot id boots directly; anything else is treated as an image to

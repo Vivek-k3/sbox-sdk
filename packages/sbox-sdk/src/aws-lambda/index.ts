@@ -33,7 +33,7 @@ import type {
   Preview,
   SandboxInfo,
   SandboxProvider,
-  SandboxSpec,
+  ResolvedSandboxSpec,
   SandboxState,
 } from "../adapter/index.js";
 
@@ -94,6 +94,7 @@ export const AWS_LAMBDA_CAPS = {
   stop: "unsupported",
   streaming: "emulated",
   volumes: "unsupported",
+  templateBuild: "unsupported",
 } as const satisfies CapabilityMap;
 
 export type AwsLambdaCaps = typeof AWS_LAMBDA_CAPS;
@@ -341,7 +342,7 @@ export const awsLambda = defineProvider<
     capabilities: AWS_LAMBDA_CAPS,
     flags: AWS_LAMBDA_FLAGS,
 
-    async create(spec: SandboxSpec): Promise<DriverHandle<MicrovmRef>> {
+    async create(spec: ResolvedSandboxSpec): Promise<DriverHandle<MicrovmRef>> {
       const image = spec.template ?? opts.imageIdentifier;
       if (!image) {
         throw new SandboxError(
