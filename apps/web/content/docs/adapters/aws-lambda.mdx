@@ -1,35 +1,53 @@
 ---
 title: AWS Lambda MicroVMs
 icon: aws-lambda
-description: Firecracker-based serverless sandboxes (GA June 2026) with suspend/resume up to 8h. Control plane via @aws-sdk/client-lambda-microvms; you bake a small runner into the image.
+description: Firecracker-based serverless sandboxes with suspend/resume and idle policies. Control plane via @aws-sdk/client-lambda-microvms; a small runner baked into the image handles exec and files.
 ---
 
 <ProviderLinks provider="aws-lambda" />
 
 ## Installation
 
-`@aws-sdk/client-lambda-microvms` is an optional peer dependency, used for the control plane (launch / suspend / resume / terminate). The data plane (exec, files) is plain `fetch` to the microVM's endpoint.
+`@aws-sdk/client-lambda-microvms` is an optional peer dependency, used for the control plane (launch, suspend, resume, terminate, tokens, image builds). The data plane (exec, files, previews) is plain `fetch` to the MicroVM's endpoint.
 
 ```package-install
 sbox-sdk @aws-sdk/client-lambda-microvms
 ```
 
+`templates.build()` also needs `@aws-sdk/client-s3` (imported only when you build).
+
 ## How it works
 
-AWS Lambda MicroVMs give you isolation, lifecycle, and a dedicated HTTPS endpoint — but **the in-VM exec/filesystem protocol is defined by your image**. So this adapter speaks a tiny "runner" protocol over the endpoint, and you bake a reference runner into your MicroVM image once.
+AWS Lambda MicroVMs give you isolation, lifecycle and a dedicated HTTPS endpoint, but **the in-VM exec/filesystem protocol is defined by your image**. The adapter speaks a small runner protocol, and you bake the reference runner into your MicroVM image once.
 
-1. Build a MicroVM image from a `Dockerfile` + the reference runner, upload to S3, and call `CreateMicrovmImage` → note the **image ARN**.
-2. The adapter calls `RunMicrovm` (launch from that ARN), `CreateMicrovmAuthToken` (JWE), then `Suspend`/`Resume`/`Terminate`.
-3. Each op is an HTTPS request to the microVM endpoint with `X-aws-proxy-auth` + `X-aws-proxy-port` headers, routed to the runner's `POST /sbox/exec`, `/sbox/fs/read`, `/sbox/fs/write`.
+1. Build a MicroVM image from a zip (`Dockerfile` at the root + the runner) with `CreateMicrovmImage`, with **lifecycle hooks enabled** → note the image ARN.
+2. The adapter calls `RunMicrovm` (idempotent via `clientToken`), mints `CreateMicrovmAuthToken` JWEs scoped to single ports (≤ 60 minutes, refreshed automatically) and uses `Suspend`/`Resume`/`Terminate`.
+3. Exec and files are HTTPS requests to the endpoint with `X-aws-proxy-auth` + `X-aws-proxy-port`, served by the runner: streaming `POST /sbox/exec` (NDJSON), `POST /sbox/kill`, `GET|PUT /sbox/files`.
 
 <Callout type="info">
-  The reference runner (a dependency-free Node server) ships in the package at
-  `sbox-sdk/src/aws-lambda/runner/` — `server.mjs`, `Dockerfile`, and a README
-  with the exact build & `create-microvm-image` commands. The runner runs
-  **inside the isolated MicroVM**; executing arbitrary commands is its purpose.
+  The reference runner ships in the package at `sbox-sdk/src/aws-lambda/runner/`
+  (`server.mjs`, `Dockerfile` based on
+  `public.ecr.aws/lambda/microvms:al2023-minimal`, and a README with the exact
+  `create-microvm-image` command). It runs **inside the isolated MicroVM**;
+  executing arbitrary commands is its purpose.
 </Callout>
 
-## Usage
+### Building the runner image
+
+```bash
+zip -j sbox-runner.zip Dockerfile server.mjs   # Dockerfile at the zip root
+aws s3 cp sbox-runner.zip s3://YOUR_BUCKET/sbox-runner.zip
+aws lambda-microvms create-microvm-image \
+  --name sbox-runner \
+  --base-image-arn arn:aws:lambda:us-east-1:aws:microvm-image:al2023-1 \
+  --build-role-arn arn:aws:iam::123456789012:role/MicrovmBuildRole \
+  --code-artifact '{"uri":"s3://YOUR_BUCKET/sbox-runner.zip"}' \
+  --hooks '{"port":9000,"microvmHooks":{"run":"ENABLED"}}'
+```
+
+The runner serves the data plane on `8080` and the lifecycle hooks on `9000`. `spec.env` and `metadata` reach the MicroVM as `runHookPayload` on the `/run` hook, which **only fires when the image was created with `--hooks`**. The adapter's tokens never include the hooks port.
+
+## Quickstart
 
 ```ts
 import { createSandboxClient } from "sbox-sdk";
@@ -39,30 +57,82 @@ const client = createSandboxClient({
   provider: awsLambda({
     imageIdentifier:
       "arn:aws:lambda:us-east-1:123456789012:microvm-image:sbox-runner",
-    region: process.env.AWS_REGION!,
-    credentials: {
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-    },
+    region: "us-east-1",
   }),
 });
 
-const sandbox = await client.create();
-const res = await sandbox.commands.run("echo hello");
+const sandbox = await client.create({
+  env: { MODE: "dev" },
+  lifecycle: {
+    idleTimeoutMs: 15 * 60_000,
+    onIdle: "pause",
+    autoResume: true,
+    maxAgeMs: 4 * 3600_000,
+  },
+});
+for await (const ev of sandbox.commands.run("echo $MODE; sleep 1; echo done")) {
+  console.log(ev);
+}
 await sandbox.files.write("/tmp/data.txt", "hi");
-
-await sandbox.pause(); // SuspendMicrovm — memory + disk preserved (up to 8h)
+await sandbox.pause(); // SuspendMicrovm: memory + disk preserved
 await sandbox.resume(); // ResumeMicrovm
 await sandbox.destroy(); // TerminateMicrovm
 ```
 
-`credentials` and `region` resolve through the standard AWS SDK chain (environment variables, shared config, or an instance/task role) when those options are omitted.
-
-[`template`](/templates) overrides the image ARN per `create()`; otherwise the `imageIdentifier` option is used.
+`credentials` and `region` resolve through the standard AWS SDK chain when omitted. [`template`](/templates) overrides the image ARN per `create()`.
 
 ## Authentication
 
 <AuthEnv provider="aws-lambda" />
+
+The live tests read `AWS_REGION` and `AWS_LAMBDA_MICROVM_IMAGE_ARN` (credentials from the default chain), plus `AWS_LAMBDA_MICROVM_S3_BUCKET` and `AWS_LAMBDA_MICROVM_BUILD_ROLE_ARN` to run the template build.
+
+## How it maps
+
+| Spec field                                  | RunMicrovm                                                                   |
+| ------------------------------------------- | ---------------------------------------------------------------------------- |
+| `template`                                  | `imageIdentifier` (`imageVersion` option pins a version)                     |
+| `env`, inline `secrets`, `metadata`, `name` | `runHookPayload` JSON (≤ 16 KB), applied by the runner's `/run` hook         |
+| `lifecycle.maxAgeMs`                        | `maximumDurationInSeconds` (≤ 8 h)                                           |
+| `lifecycle.idleTimeoutMs`                   | `idlePolicy.maxIdleDurationSeconds` (idle = no traffic through the endpoint) |
+| `lifecycle.autoResume`                      | `idlePolicy.autoResumeEnabled`                                               |
+| `lifecycle.onIdle: "destroy"`               | `idlePolicy.suspendedDurationSeconds: 1` (terminate right after suspend)     |
+| `network: { mode: "block-all" }`            | no egress network connectors                                                 |
+| `idempotencyKey`                            | `clientToken`                                                                |
+| options                                     | `executionRoleArn`, `logging`, `ingress/egressNetworkConnectors`             |
+
+MicroVMs have no tags, so `metadata` is remembered by the creating process and served by the runner's `/sbox/info`; `list({ metadata })` only matches sandboxes whose metadata is known to this process.
+
+## Previews
+
+Every MicroVM port is private. `ports.expose(port)` mints a token scoped to that port and returns header auth plus its expiry:
+
+```ts
+const p = await sandbox.ports.expose(3000);
+// { url: "https://<endpoint>", auth: { type: "header", headers: { "X-aws-proxy-auth": "…", "X-aws-proxy-port": "3000" } }, expiresAt }
+await sandbox.ports.fetch(3000, "/health"); // refreshes the token as needed
+```
+
+Browsers can't send these headers on a WebSocket; AWS accepts the token as WebSocket subprotocols instead (`lambda-microvms`, `lambda-microvms.authentication.<token>`, `lambda-microvms.port.<port>`), so `previewBrowserAuth` is `false`.
+
+## Templates
+
+With `s3Bucket` and `buildRoleArn` set, `templates.build({ source: { dockerfile, context } })` zips the context with the `Dockerfile` at the root, uploads it to S3, calls `CreateMicrovmImage` with hooks enabled (`hooksPort`, default 9000), tags the image with the cache key, and polls `GetMicrovmImageVersion` plus the per-architecture builds (`ListMicrovmImageBuilds` / `GetMicrovmImageBuild`), streaming their states as build events.
+
+```ts
+const tpl = await client.templates.build({
+  source: {
+    dockerfile: `FROM public.ecr.aws/lambda/microvms:al2023-minimal
+RUN dnf install -y nodejs python3 && dnf clean all
+COPY server.mjs /opt/sbox/server.mjs
+CMD ["node", "/opt/sbox/server.mjs"]`,
+    context: { "server.mjs": runnerSource },
+  },
+});
+const sb = await client.create({ template: tpl });
+```
+
+Your Dockerfile must start the runner. The build role needs `s3:GetObject` on the artifact.
 
 ## Options
 
@@ -73,15 +143,23 @@ await sandbox.destroy(); // TerminateMicrovm
 
 ## Capabilities
 
-| Capability          |    Level    | Notes                                |
-| ------------------- | :---------: | ------------------------------------ |
-| `list` / `region`   |   native    |                                      |
-| `pause`             |   native    | `Suspend` preserves memory + disk    |
-| `stop`              | unsupported | only run / suspend / terminate       |
-| `streaming`         |  emulated   | runner returns buffered output       |
-| `filesUpload`       |   native    | via the runner                       |
-| `exposePort`        |   native    | endpoint + `X-aws-proxy-port` + JWE  |
-| `codeInterpreter`   | unsupported |                                      |
-| `snapshot` / `fork` | unsupported | the image is the build-time snapshot |
+| Capability                                       |    Level    | Notes                                                                            |
+| ------------------------------------------------ | :---------: | -------------------------------------------------------------------------------- |
+| `list` / `region`                                |   native    | `nextToken` pagination                                                           |
+| `pause`                                          |   native    | Suspend preserves memory + disk                                                  |
+| `streaming` / `killProcess`                      |   native    | runner NDJSON exec, `/sbox/kill`, `/sbox/ps`                                     |
+| `exposePort` / `privatePreview` / `proxiedFetch` |   native    | port-scoped JWE, header auth, `expiresAt`                                        |
+| `templateBuild`                                  |   native    | Dockerfile + S3 (`s3Bucket`, `buildRoleArn`)                                     |
+| `stop`                                           | unsupported | only run / suspend / terminate                                                   |
+| `setTimeout`                                     | unsupported | no API changes lifetime or idle policy after launch                              |
+| `egressControl`                                  | unsupported | connectors are fixed at launch (`block-all` at create works)                     |
+| `pty` / `ssh`                                    | unsupported | `CreateMicrovmShellAuthToken` exists but its connection protocol is undocumented |
+| `snapshot` / `fork` / `volumes`                  | unsupported | the image is the build-time snapshot                                             |
 
-`preservesMemoryOnPause` is `true`; `previewModel` is `tunnel`.
+Flags: `perCommandEnvCwd: true` (the runner applies cwd/env), `preservesMemoryOnPause: true`, `previewModel: "tunnel"`, `templateSources: ["dockerfile"]`.
+
+## Limitations
+
+- Exec/files need the runner in the image; `env` needs the image's `run` hook enabled.
+- `tokenTtlMinutes` must be 1–60 (AWS's maximum); the factory throws otherwise.
+- `verify()` is `ListMicrovms({ maxResults: 1 })`.

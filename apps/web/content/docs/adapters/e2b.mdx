@@ -1,41 +1,51 @@
 ---
 title: E2B
 icon: e2b
-description: The canonical reference adapter — richest capability set, with a code interpreter, snapshots, native ports, and pause/resume. Backed by @e2b/code-interpreter.
+description: The reference cloud adapter. Code interpreter, memory pause/resume, memory or filesystem snapshots, fork, PTY, egress rules with secret injection, volumes, and Dockerfile template builds. Backed by @e2b/code-interpreter.
 ---
 
 <ProviderLinks provider="e2b" />
 
 ## Installation
 
-`@e2b/code-interpreter` is an optional peer dependency of `sbox-sdk`, loaded lazily on first use — install it alongside the SDK so the adapter's import resolves at runtime.
+`@e2b/code-interpreter` (≥ 2.9, which bundles `e2b` ≥ 2.64) is an optional peer dependency of `sbox-sdk`. The adapter loads it lazily the first time you use it, so install it next to the SDK:
 
 ```package-install
 sbox-sdk @e2b/code-interpreter
 ```
 
-## Usage
+## Authentication
+
+<AuthEnv provider="e2b" />
+
+`apiKey` falls back to `E2B_API_KEY`, and `domain` falls back to `E2B_DOMAIN`. Every SDK call (sandboxes, templates, volumes, secrets) goes through one client bound to these options, so a self-hosted or BYOC `domain` applies everywhere.
+
+## Quickstart
 
 ```ts
 import { createSandboxClient } from "sbox-sdk";
 import { e2b } from "sbox-sdk/e2b";
 
 const client = createSandboxClient({
-  provider: e2b({ apiKey: process.env.E2B_API_KEY! }),
+  provider: e2b({ apiKey: process.env.E2B_API_KEY }),
 });
 
-const sandbox = await client.create({ template: "python-3.12", ttlMs: 60_000 });
+const sandbox = await client.create({
+  lifecycle: { maxAgeMs: 10 * 60_000, onIdle: "pause", autoResume: true },
+  metadata: { job: "demo" },
+});
 
-// E2B has a code interpreter, so `sandbox.code` is defined:
-const exec = await sandbox.code.runCode("import matplotlib; print('ok')");
-console.log(exec.logs.stdout);
+const r = await sandbox.commands.run("python3 -c 'print(6 * 7)'");
+console.log(r.stdout); // "42\n"
+
+// The default template is E2B's code interpreter, so `sandbox.code` works:
+const exec = await sandbox.code.runCode("import sys; sys.version");
+console.log(exec.results[0]?.text);
+
+await sandbox.destroy();
 ```
 
-E2B is the richest adapter and the reference implementation other adapters are measured against. [`template`](/templates) maps to an E2B template id / alias (e.g. `"python-3.12"` or a custom-built template).
-
-## Authentication
-
-<AuthEnv provider="e2b" />
+`template` takes an E2B template name or id (for example `"base"`, `"my-app:v2"`, or a `TemplateRef` from `client.templates.build()`). `fromSnapshot` takes a snapshot id; on E2B, restoring a snapshot always boots a **new** sandbox, so use `client.create({ fromSnapshot })` (`snapshots.restore()` isn't offered).
 
 ## Options
 
@@ -44,19 +54,115 @@ E2B is the richest adapter and the reference implementation other adapters are m
   name="E2BOptions"
 />
 
+## Templates (Dockerfile builds)
+
+`client.templates.build()` builds in **your** E2B team with `Template().fromDockerfile()` + `Template.build()`. Templates stay private to your team: the adapter never publishes them. Builds are cached by content hash. The template is named `<name>-<first 16 hex of the cache key>`, so an unchanged spec is found again instead of rebuilt.
+
+```ts
+const tpl = await client.templates.build(
+  {
+    name: "borat-desktop",
+    source: {
+      dockerfile: await readFile("desktop/Dockerfile", "utf8"),
+      context: "./desktop", // a directory (Node), or { "path": contents }
+    },
+    user: "root",
+    workdir: "/app",
+    env: { DISPLAY: ":1" },
+    startCmd: "/usr/local/bin/start-vnc.sh",
+    readyCmd: "curl -sf http://localhost:6080/vnc.html",
+    resources: { vcpus: 2, memoryMB: 4096, diskMB: 8192 },
+  },
+  { onEvent: (e) => e.type === "log" && console.log(e.line) }
+);
+
+const desktop = await client.create({ template: tpl });
+```
+
+- **Sources:** `dockerfile` (+ `context`), `image` (with optional `registryAuth`), or `snapshot` (builds on top of an E2B snapshot with `fromTemplate`).
+- **Context:** files are written to a temp directory and passed as the builder's `fileContextPath`, so `COPY`/`ADD` work. A Dockerfile build therefore needs Node (or Bun/Deno with `node:fs`). Multi-stage Dockerfiles aren't supported by E2B.
+- **`startCmd`** runs once during the build and is captured in the memory snapshot, so it's already running when a sandbox boots. If you set `startCmd` without `readyCmd`, the build waits 20 s. Pass a `readyCmd` instead.
+- **`env`** maps to `setEnvs()`, the same as a Dockerfile `ENV`. **`resources`**: `vcpus` → `cpuCount`, `memoryMB` → `memoryMB`, `diskMB` → `minFreeDiskMb` (minimum free space after the build, best effort).
+- Build logs stream through `onEvent` (`error`-level lines arrive with `stream: "stderr"`).
+
+## Previews and browser auth
+
+Every port is reachable at `https://<port>-<sandboxId>.<domain>`. Visibility is set **per sandbox**, not per port:
+
+- `e2b({ allowPublicTraffic: false })` creates private sandboxes. Every request must carry the sandbox's traffic token in the `e2b-traffic-access-token` header, and `ports.expose()` returns `auth: { type: "header", headers: { "e2b-traffic-access-token": "…" } }`.
+- With public traffic, `expose()` returns `auth: { type: "public" }`, and `expose(port, { visibility: "private" })` throws `Validation` instead of handing back a public URL.
+
+```ts
+const client = createSandboxClient({
+  provider: e2b({ allowPublicTraffic: false }),
+});
+const sb = await client.create({ template: tpl });
+const vnc = await sb.ports.expose(6080, { visibility: "private" });
+const res = await sb.ports.fetch(6080, "/vnc.html"); // token header added for you
+```
+
+<Callout
+  type="warn"
+  title="Private previews don't work from a browser WebSocket"
+>
+  E2B's edge proxy reads the traffic token **only** from the
+  `e2b-traffic-access-token` request header. There is no query-string token,
+  cookie, or signed URL (verified against the proxy source in `e2b-dev/runtime`,
+  `packages/shared/pkg/proxy/ingress.go`). Browsers can't set custom headers on
+  a WebSocket, so `flags.previewBrowserAuth` is `false` and `browserUrl()`
+  throws for private E2B previews. For noVNC in a browser, either use a public
+  sandbox (and treat the URL as a secret) or put a small proxy you control in
+  front that adds the header.
+</Callout>
+
+`ports.fetch()` uses the adapter's native `proxyFetch`: it goes through E2B's proxy, adds the token header when there is one, and never makes anything public.
+
+## Lifecycle
+
+| `SandboxSpec`             | E2B                                                                                             |
+| ------------------------- | ----------------------------------------------------------------------------------------------- |
+| `lifecycle.maxAgeMs`      | `timeoutMs` (wall clock; `setTimeout()` extends it)                                             |
+| `lifecycle.idleTimeoutMs` | used as `timeoutMs` when `maxAgeMs` is unset. E2B has no idle timer: activity doesn't reset it. |
+| `onIdle: "pause"`         | `lifecycle.onTimeout: "pause"` (memory + disk)                                                  |
+| `onIdle: "stop"`          | `onTimeout: { action: "pause", mode: "filesystem" }` (disk only; resume reboots)                |
+| `onIdle: "destroy"`       | `onTimeout: "kill"` (E2B default)                                                               |
+| `autoResume: true`        | `lifecycle.autoResume` (requires `onIdle: "pause"`)                                             |
+
+`pause()` keeps memory. `resume()` reconnects, and the id doesn't change. `getInfo()` and `list()` report the live state (`running`, `paused`, and so on).
+
+## Network, secrets and volumes
+
+- **Egress** (`spec.network`, `sandbox.network.setEgressPolicy`): `allow-list` → `allowOut` + `denyOut: ["0.0.0.0/0"]`, `block-all` → `denyOut: ["0.0.0.0/0"]`, `allow-all` + `deny.cidrs` → `denyOut`. E2B deny rules take CIDRs and IPs only, so `deny.domains` throws `Validation`. Runtime updates replace the whole egress config.
+- **Credential injection** (`network.inject`) becomes E2B per-host request transforms that use `Secret.fill(name)`. The egress proxy injects the value into outbound **HTTPS** requests, and the secret never enters the sandbox. A `SecretRef` with a `value` is stored (created or updated) as an E2B secret first. A plain string header value is read as the name of an existing E2B secret. An injection host still has to be allowed by the policy.
+- **`spec.secrets`:** `mode: "env"` needs an inline `value` (E2B secrets are write-only and can't be read back into env vars). `mode: "egress"` with a `value` stores the secret for use in `inject`.
+- **Volumes:** `client.volumes.create/get/list/delete` wrap E2B's `Volume` (no size or region options). `spec.volumes` maps to `volumeMounts` by volume name (an id is resolved to its name). E2B mounts can't be read-only, so `readOnly: true` throws.
+
 ## Capabilities
 
-| Capability                                 |    Level    | Notes                                              |
-| ------------------------------------------ | :---------: | -------------------------------------------------- |
-| `list` / `pause` / `setTimeout`            |   native    |                                                    |
-| `stop`                                     | unsupported | E2B has no stop-without-destroy                    |
-| `background` / `streaming` / `killProcess` |   native    |                                                    |
-| `filesWatch` / `filesUpload`               |   native    |                                                    |
-| `codeInterpreter` / `statefulKernel`       |   native    | `sandbox.code` is defined                          |
-| `exposePort`                               |   native    | preview via subdomain                              |
-| `snapshot`                                 |   native    |                                                    |
-| `fork`                                     | unsupported |                                                    |
-| `metrics`                                  |   native    |                                                    |
-| `egressControl` / `ssh` / `proxiedFetch`   | unsupported | use [`raw()`](/escape-hatch) for E2B-only features |
+| Capability                                 |    Level    | Notes                                                                             |
+| ------------------------------------------ | :---------: | --------------------------------------------------------------------------------- |
+| `list` / `pause` / `setTimeout`            |   native    | list paginates and filters by metadata and state on the server                    |
+| `stop`                                     | unsupported | use `onIdle: "stop"` (filesystem-only auto-pause) or `pause()`                    |
+| `background` / `streaming` / `killProcess` |   native    | stdout and stderr stay separate; `kill` is SIGKILL                                |
+| `stdin`                                    |   native    | `writeStdin` on `commands.spawn()` processes; `commands.run()` keeps stdin closed |
+| `pty`                                      |   native    | `pty.create` / `pty.connect`, no SDK session timeout                              |
+| `filesWatch` / `filesUpload`               |   native    | streaming upload and download                                                     |
+| `codeInterpreter` / `statefulKernel`       |   native    | needs a code-interpreter template (the default)                                   |
+| `exposePort` / `privatePreview`            |   native    | private = header auth; `previewBrowserAuth: false`                                |
+| `proxiedFetch`                             |   native    | through E2B's proxy with the token header                                         |
+| `egressControl` / `secretsVault`           |   native    | allow/deny lists, runtime updates, secret injection                               |
+| `snapshot` / `fork`                        |   native    | `mode: "filesystem"` → `includesMemory: false`; fork captures memory              |
+| `volumes` / `templateBuild`                |   native    | sources: `dockerfile`, `image`, `snapshot`                                        |
+| `metrics`                                  |   native    | latest sample (may be empty for a few seconds after boot)                         |
+| `ssh` / `gpu` / `region`                   | unsupported |                                                                                   |
 
-`preservesMemoryOnPause` is `true`; `previewModel` is `subdomain`.
+Flags: `preservesMemoryOnPause: true`, `perCommandEnvCwd: true` (cwd, env and `user` are passed natively), `exitCodeNative: true`, `resumeChangesId: false`, `previewModel: "subdomain"`.
+
+## Known limitations
+
+- **Private previews are header-only** (see above). Browser WebSockets need a public sandbox or your own proxy.
+- `resources.memoryMB` / `diskMB` / `shmMB` aren't create-time options on E2B. Memory and disk come from the template (`templates.build({ resources })`). For `shmMB`, the adapter remounts `/dev/shm` as root right after boot, and if that fails, it kills the sandbox and throws.
+- Named sandboxes (`spec.name`, `getOrCreate`) are stored in the `sbox-name` metadata key. E2B's own `info.name` is the _template_ name.
+- `idempotencyKey` uses E2B's native `Idempotency-Key`. Keys outside `[a-z0-9-]{1,255}` are hashed (SHA-256) so retries still match. E2B keeps keys for 24 h.
+- `fork()` is all-or-nothing: if any fork fails, the ones that succeeded are killed and the error is thrown.
+- Commands default to **no** E2B-side timeout (E2B's SDK default is 60 s, which would kill long-running servers). Pass `timeoutMs` to bound a command.

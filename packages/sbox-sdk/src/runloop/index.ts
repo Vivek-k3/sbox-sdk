@@ -1,30 +1,48 @@
 /**
- * `sbox-sdk/runloop` — adapter for the Runloop devbox API (`@runloop/api-client`).
- * A "sandbox" is a Runloop devbox. exec is the buffered `devboxes.executeSync`
- * (`{ stdout, stderr, exit_status }`); the devbox applies cwd/env via a shell, so
- * the core folds them into a `cd … && KEY=v …` wrapper (`perCommandEnvCwd:
- * false`). Files use the binary-safe `downloadFile`/`uploadFile` endpoints.
- * Lifecycle: `suspend`/`resume` = pause (memory preserved), `shutdown` = destroy.
- * Snapshots map to `snapshotDisk`; `fork()` snapshots then boots N devboxes from
- * it (in-place restore is unsupported). Ports are tunnels (`enableTunnel`).
+ * `sbox-sdk/runloop`: adapter for the Runloop devbox API (`@runloop/api-client`).
+ *
+ * **Deprecated.** Runloop is winding down: support for existing customers ended
+ * on 2026-11-13. This adapter only receives crash/leak fixes and will be
+ * removed in sbox-sdk 0.2.0.
+ *
+ * A "sandbox" is a Runloop devbox. exec is `executeAndAwaitCompletion` (the
+ * devbox runs it through a shell, so the core folds cwd/env into a wrapper:
+ * `perCommandEnvCwd: false`). Files use the binary-safe `downloadFile` /
+ * `uploadFile` endpoints. `suspend`/`resume` = pause (memory preserved),
+ * `shutdown` = destroy. Snapshots map to `snapshotDisk`; `fork()` snapshots then
+ * boots N devboxes from it. Ports share the devbox's single V2 tunnel
+ * (`https://{port}-{tunnel_key}.tunnel.runloop.ai`).
+ *
  * Requires the optional peer dependency `@runloop/api-client`.
  */
+import type { Runloop } from "@runloop/api-client";
+
 import { AsyncQueue, defineProvider, SandboxError } from "../adapter/index.js";
 import type {
+  CallContext,
   CapabilityFlags,
   CapabilityMap,
   DriverExec,
   DriverHandle,
+  ExecOptions,
   OutputEvent,
   Preview,
+  ResolvedSandboxSpec,
   SandboxInfo,
   SandboxProvider,
-  ResolvedSandboxSpec,
   SandboxState,
   SnapshotRef,
 } from "../adapter/index.js";
 
+type Mod = typeof import("@runloop/api-client");
+type RunloopClient = InstanceType<Mod["default"]>;
+/** The SDK's devbox view (`raw()` on a Runloop sandbox). */
+export type DevboxView = Runloop.DevboxView;
+type TunnelView = Runloop.TunnelView;
+type DevboxCreateParams = Runloop.DevboxCreateParams;
+
 export interface RunloopOptions {
+  /** Runloop API key. Defaults to `RUNLOOP_API_KEY`. */
   apiKey?: string;
   /** Override the API base URL (default uses the SDK default). */
   baseURL?: string;
@@ -65,81 +83,54 @@ export type RunloopCaps = typeof RUNLOOP_CAPS;
 
 const RUNLOOP_FLAGS: CapabilityFlags = {
   exitCodeNative: true,
-  perCommandEnvCwd: false, // executeSync has no cwd/env — core wraps `cd && KEY=v`
+  perCommandEnvCwd: false, // execute has no cwd/env: core wraps `cd && KEY=v`
   preservesDiskOnStop: false,
   preservesMemoryOnPause: true, // suspend preserves memory
-  previewModel: "subdomain",
+  previewModel: "tunnel",
 };
 
-// Structural views of the Stainless-generated `@runloop/api-client` surface.
-interface DevboxView {
-  id: string;
-  status?: string;
-}
-interface ExecDetail {
-  stdout?: string;
-  stderr?: string;
-  exit_status?: number;
-}
-interface TunnelView {
-  url: string;
-}
-interface SnapshotView {
-  id: string;
-  name?: string;
-}
-interface RunloopClient {
-  devboxes: {
-    create(params: Record<string, unknown>): Promise<DevboxView>;
-    retrieve(id: string): Promise<DevboxView>;
-    list(
-      params?: Record<string, unknown>
-    ): Promise<{ devboxes?: DevboxView[] }>;
-    executeSync(
-      id: string,
-      params: { command: string; shell_name?: string }
-    ): Promise<ExecDetail>;
-    shutdown(id: string): Promise<DevboxView>;
-    suspend(id: string): Promise<DevboxView>;
-    resume(id: string): Promise<DevboxView>;
-    snapshotDisk(id: string, params: { name?: string }): Promise<SnapshotView>;
-    uploadFile(
-      id: string,
-      params: { path: string; file: Uint8Array }
-    ): Promise<unknown>;
-    downloadFile(id: string, params: { path: string }): Promise<Response>;
-    enableTunnel(id: string, params: { port: number }): Promise<TunnelView>;
-    removeTunnel(id: string, params: { port: number }): Promise<unknown>;
-  };
-}
+const PROVIDER = "runloop";
 
-interface RunloopModule {
-  default: new (opts: Record<string, unknown>) => RunloopClient;
-}
-let cached: RunloopModule | null = null;
-async function loadRunloop(): Promise<RunloopModule> {
-  if (!cached) {
-    cached = (await import("@runloop/api-client")) as unknown as RunloopModule;
-  }
+let cached: Mod | null = null;
+async function loadRunloop(): Promise<Mod> {
+  cached ??= await import("@runloop/api-client");
   return cached;
 }
 
-function mapState(state: string | undefined): SandboxState {
-  switch ((state ?? "").toLowerCase()) {
+let warned = false;
+function warnDeprecated(): void {
+  if (!warned) {
+    warned = true;
+    console.warn(
+      "[sbox] sbox-sdk/runloop is deprecated: Runloop ended customer support on 2026-11-13. The adapter will be removed in sbox-sdk 0.2.0."
+    );
+  }
+}
+
+/** Runloop devbox status (+ execution `queued`) -> SandboxState. */
+export function mapRunloopState(state: string | undefined): SandboxState {
+  switch (state) {
     case "running": {
       return "running";
     }
-    case "suspended":
     case "suspending": {
+      return "suspending";
+    }
+    case "suspended": {
       return "paused";
     }
+    case "queued":
+    case "scheduled":
     case "provisioning":
-    case "initializing": {
+    case "initializing":
+    case "resuming": {
       return "creating";
     }
-    case "shutdown":
     case "failure": {
-      return state === "failure" ? "error" : "destroyed";
+      return "error";
+    }
+    case "shutdown": {
+      return "destroyed";
     }
     default: {
       return "unknown";
@@ -147,180 +138,317 @@ function mapState(state: string | undefined): SandboxState {
   }
 }
 
+/** Stainless `APIError`s carry `status`; long-poll failures are timeouts. */
+export function mapRunloopError(err: unknown): SandboxError | undefined {
+  if (err instanceof SandboxError) {
+    return err;
+  }
+  if (!(err instanceof Error)) {
+    return undefined;
+  }
+  const opts = { cause: err, provider: PROVIDER };
+  if (
+    err.name === "PollingTimeoutError" ||
+    err.name === "APIConnectionTimeoutError" ||
+    err.name === "AbortError"
+  ) {
+    return new SandboxError("Timeout", err.message, opts);
+  }
+  const status = (err as { status?: unknown }).status;
+  if (typeof status !== "number") {
+    return undefined;
+  }
+  const init = { ...opts, status };
+  if (status === 401 || status === 403) {
+    return new SandboxError("Unauthorized", err.message, init);
+  }
+  if (status === 404) {
+    return new SandboxError("NotFound", err.message, init);
+  }
+  if (status === 409) {
+    return new SandboxError("Conflict", err.message, init);
+  }
+  if (status === 429) {
+    return new SandboxError("QuotaExceeded", err.message, {
+      ...init,
+      retryable: true,
+    });
+  }
+  if (status === 408) {
+    return new SandboxError("Timeout", err.message, init);
+  }
+  if (status === 400 || status === 422) {
+    return new SandboxError("Validation", err.message, init);
+  }
+  return new SandboxError("Provider", err.message, init);
+}
+
+const wrap = (e: unknown): SandboxError =>
+  mapRunloopError(e) ?? SandboxError.wrap(e, PROVIDER);
+
+function info(d: DevboxView): SandboxInfo {
+  return {
+    createdAt: d.create_time_ms ? new Date(d.create_time_ms) : undefined,
+    id: d.id,
+    metadata: { ...d.metadata },
+    name: d.name ?? undefined,
+    provider: PROVIDER,
+    raw: d,
+    state: mapRunloopState(d.status),
+  };
+}
+
+function tunnelPreview(tunnel: TunnelView, port: number): Preview {
+  const url = `https://${port}-${tunnel.tunnel_key}.tunnel.runloop.ai`;
+  if (tunnel.auth_mode === "authenticated" && tunnel.auth_token) {
+    return {
+      auth: {
+        headers: {
+          "X-Runloop-Tunnel-Authorization": `Bearer ${tunnel.auth_token}`,
+        },
+        type: "header",
+      },
+      port,
+      url,
+    };
+  }
+  return { auth: { type: "public" }, port, url };
+}
+
+/**
+ * @deprecated Runloop ended customer support on 2026-11-13. This adapter will
+ * be removed in sbox-sdk 0.2.0.
+ */
 export const runloop = defineProvider<RunloopCaps, DevboxView, RunloopOptions>(
-  (opts) => {
+  (opts = {}) => {
+    warnDeprecated();
     let clientP: Promise<RunloopClient> | null = null;
     const getClient = (): Promise<RunloopClient> => {
-      if (!clientP) {
-        clientP = loadRunloop().then(
-          (mod) =>
-            new mod.default({
-              bearerToken: opts.apiKey,
-              baseURL: opts.baseURL,
-            })
-        );
-      }
+      clientP ??= loadRunloop().then(
+        (mod) =>
+          new mod.default({ baseURL: opts.baseURL, bearerToken: opts.apiKey })
+      );
       return clientP;
     };
 
     const makeHandle = (
-      devbox: DevboxView,
-      client: RunloopClient
+      initial: DevboxView,
+      client: RunloopClient,
+      toFile: Mod["toFile"]
     ): DriverHandle<DevboxView> => {
-      const { id } = devbox;
+      const { id } = initial;
+      let devbox = initial;
+      const exposed = new Set<number>();
 
       return {
-        id,
-        raw: devbox,
-
-        getInfo(): SandboxInfo {
-          return {
-            id,
-            state: mapState(devbox.status),
-            provider: "runloop",
-            metadata: {},
-            raw: devbox,
-          };
-        },
         async destroy(): Promise<void> {
           await client.devboxes.shutdown(id);
         },
+        exec(cmd: string, eopts: ExecOptions, ctx: CallContext): DriverExec {
+          const queue = new AsyncQueue<OutputEvent>();
+          const ac = new AbortController();
+          let settled = false;
+          const outer = eopts.signal ?? ctx.signal;
+          outer?.addEventListener("abort", () => ac.abort(), { once: true });
+          void client.devboxes
+            .executeAndAwaitCompletion(
+              id,
+              { command: cmd },
+              {
+                signal: ac.signal,
+                ...(eopts.timeoutMs && eopts.timeoutMs > 0
+                  ? { longPoll: { timeoutMs: eopts.timeoutMs } }
+                  : {}),
+              }
+            )
+            .then((r) => {
+              if (settled) {
+                return;
+              }
+              settled = true;
+              if (r.stdout) {
+                queue.push({ data: r.stdout, type: "stdout" });
+              }
+              if (r.stderr) {
+                queue.push({ data: r.stderr, type: "stderr" });
+              }
+              queue.push({ exitCode: r.exit_status ?? 0, type: "exit" });
+              queue.close();
+            })
+            .catch((error: unknown) => {
+              if (!settled) {
+                settled = true;
+                queue.fail(wrap(error));
+              }
+            });
+          return {
+            [Symbol.asyncIterator]: () => queue.iterator(),
+            async kill() {
+              // Stops waiting on the execution. The deprecated adapter does not
+              // track execution ids, so the remote command is not signalled.
+              ac.abort();
+              if (!settled) {
+                settled = true;
+                queue.push({ exitCode: 137, signal: "SIGKILL", type: "exit" });
+                queue.close();
+              }
+            },
+            pid: Promise.resolve(""),
+          };
+        },
+        async exposePort(port: number): Promise<Preview> {
+          // One tunnel per devbox serves every port; reuse it if present.
+          let tunnel = devbox.tunnel;
+          if (!tunnel) {
+            devbox = await client.devboxes.retrieve(id);
+            tunnel = devbox.tunnel;
+          }
+          tunnel ??= await client.devboxes.enableTunnel(id);
+          devbox = { ...devbox, tunnel };
+          exposed.add(port);
+          return tunnelPreview(tunnel, port);
+        },
+        async fork(count: number): Promise<DriverHandle<DevboxView>[]> {
+          // No in-place fork: snapshot the disk, then boot N devboxes from it.
+          const snap = await client.devboxes.snapshotDisk(id, {});
+          const forks = await Promise.all(
+            Array.from({ length: count }, () =>
+              client.devboxes.createAndAwaitRunning({ snapshot_id: snap.id })
+            )
+          );
+          return forks.map((d) => makeHandle(d, client, toFile));
+        },
+        async getInfo(): Promise<SandboxInfo> {
+          devbox = await client.devboxes.retrieve(id);
+          return info(devbox);
+        },
+        id,
+        name: initial.name ?? undefined,
         async pause(): Promise<void> {
           await client.devboxes.suspend(id);
+          await client.devboxes.awaitSuspended(id);
+        },
+        get raw() {
+          return devbox;
+        },
+        async readFile(path: string): Promise<Uint8Array> {
+          try {
+            const res = await client.devboxes.downloadFile(id, { path });
+            return new Uint8Array(await res.arrayBuffer());
+          } catch (error) {
+            const err = wrap(error);
+            // Runloop reports a missing path as a 400 with a message.
+            if (
+              err.code === "Validation" &&
+              /not found|no such file|does not exist/i.test(err.message)
+            ) {
+              throw new SandboxError("NotFound", `no such file: '${path}'`, {
+                cause: error,
+                provider: PROVIDER,
+                status: err.status,
+              });
+            }
+            throw err;
+          }
         },
         async resume(): Promise<void> {
           await client.devboxes.resume(id);
+          await client.devboxes.awaitRunning(id);
         },
-
-        exec(cmd: string): DriverExec {
-          const queue = new AsyncQueue<OutputEvent>();
-          void client.devboxes
-            .executeSync(id, { command: cmd })
-            .then((r) => {
-              if (r.stdout) {
-                queue.push({ type: "stdout", data: r.stdout });
-              }
-              if (r.stderr) {
-                queue.push({ type: "stderr", data: r.stderr });
-              }
-              queue.push({ type: "exit", exitCode: r.exit_status ?? 0 });
-              queue.close();
-            })
-            .catch((error) =>
-              queue.fail(
-                error instanceof SandboxError
-                  ? error
-                  : SandboxError.wrap(error, "runloop")
-              )
-            );
-          return {
-            pid: Promise.resolve(""),
-            async kill() {
-              /* executeSync is buffered; no kill handle */
-            },
-            [Symbol.asyncIterator]: () => queue.iterator(),
-          };
-        },
-
-        async readFile(path: string): Promise<Uint8Array> {
-          const res = await client.devboxes.downloadFile(id, { path });
-          return new Uint8Array(await res.arrayBuffer());
-        },
-        async writeFile(path: string, data: Uint8Array): Promise<void> {
-          await client.devboxes.uploadFile(id, { path, file: data });
-        },
-
-        async exposePort(port: number): Promise<Preview> {
-          const tunnel = await client.devboxes.enableTunnel(id, { port });
-          return { url: tunnel.url, port };
-        },
-        async unexposePort(port: number): Promise<void> {
-          await client.devboxes.removeTunnel(id, { port });
-        },
-
         async snapshot(snapOpts: { name?: string }): Promise<SnapshotRef> {
           const snap = await client.devboxes.snapshotDisk(id, {
             name: snapOpts.name,
           });
           return {
+            createdAt: new Date(snap.create_time_ms),
             id: snap.id,
+            includesMemory: false,
             name: snap.name ?? snapOpts.name,
-            provider: "runloop",
+            provider: PROVIDER,
             raw: snap,
           };
         },
-        async fork(count: number): Promise<DriverHandle<DevboxView>[]> {
-          // Runloop has no in-place fork: snapshot the disk, then boot N devboxes
-          // from that snapshot.
-          const snap = await client.devboxes.snapshotDisk(id, {});
-          const forks = await Promise.all(
-            Array.from({ length: count }, () =>
-              client.devboxes.create({ snapshot_id: snap.id })
-            )
-          );
-          return forks.map((d) => makeHandle(d, client));
+        async unexposePort(port: number): Promise<void> {
+          exposed.delete(port);
+          // removeTunnel takes no port: it tears down the devbox's only tunnel,
+          // so only do it once nothing else is exposed through it.
+          if (exposed.size === 0) {
+            await client.devboxes.removeTunnel(id);
+            devbox = { ...devbox, tunnel: null };
+          }
+        },
+        async writeFile(path: string, data: Uint8Array): Promise<void> {
+          const name = path.slice(path.lastIndexOf("/") + 1) || "file";
+          await client.devboxes.uploadFile(id, {
+            file: await toFile(data, name),
+            path,
+          });
         },
       };
     };
 
     const provider: SandboxProvider<RunloopCaps, DevboxView> = {
-      name: "runloop",
       capabilities: RUNLOOP_CAPS,
-      flags: RUNLOOP_FLAGS,
-
+      async connect(id: string): Promise<DriverHandle<DevboxView>> {
+        const [client, mod] = await Promise.all([getClient(), loadRunloop()]);
+        return makeHandle(
+          await client.devboxes.retrieve(id),
+          client,
+          mod.toFile
+        );
+      },
       async create(
         spec: ResolvedSandboxSpec
       ): Promise<DriverHandle<DevboxView>> {
-        const client = await getClient();
-        const tpl = spec.template ?? opts.blueprintId;
-        const params: Record<string, unknown> = {
-          name: spec.name,
+        const [client, mod] = await Promise.all([getClient(), loadRunloop()]);
+        const params: DevboxCreateParams = {
           environment_variables: spec.env,
+          metadata: spec.metadata,
+          name: spec.name,
         };
-        // A snapshot id restores disk state; otherwise treat the template as a
-        // blueprint id.
-        if (tpl) {
-          if (/^snp|snapshot/i.test(tpl)) {
-            params.snapshot_id = tpl;
-          } else {
-            params.blueprint_id = tpl;
-          }
+        const tpl = spec.fromSnapshot ?? spec.template ?? opts.blueprintId;
+        // A snapshot id restores disk state; otherwise it's a blueprint id.
+        if (spec.fromSnapshot || (tpl && /^snp|snapshot/i.test(tpl))) {
+          params.snapshot_id = tpl;
+        } else if (tpl) {
+          params.blueprint_id = tpl;
         }
-        const devbox = await client.devboxes.create(params);
-        // Best-effort wait for the devbox to finish provisioning.
-        for (let i = 0; i < 30 && devbox.status !== "running"; i++) {
-          const got = await client.devboxes
-            .retrieve(devbox.id)
-            .catch(() => null);
-          if (!got) {
-            break;
-          }
-          devbox.status = got.status;
-          if (got.status === "running" || got.status === "failure") {
-            break;
-          }
-          await new Promise((r) => setTimeout(r, 1000));
-        }
-        return makeHandle(devbox, client);
+        // Throws if the devbox fails to boot instead of handing back a
+        // provisioning/failed devbox.
+        const devbox = await client.devboxes.createAndAwaitRunning(params);
+        return makeHandle(devbox, client, mod.toFile);
       },
-
-      async connect(id: string): Promise<DriverHandle<DevboxView>> {
+      flags: RUNLOOP_FLAGS,
+      async *list(filter): AsyncIterable<SandboxInfo> {
         const client = await getClient();
-        return makeHandle(await client.devboxes.retrieve(id), client);
-      },
-
-      async *list(): AsyncIterable<SandboxInfo> {
-        const client = await getClient();
-        const page = await client.devboxes.list();
-        for (const d of page.devboxes ?? []) {
-          yield {
-            id: d.id,
-            state: mapState(d.status),
-            provider: "runloop",
-            metadata: {},
-            raw: d,
-          };
+        let n = 0;
+        // The page promise auto-paginates across every cursor page.
+        for await (const d of client.devboxes.list({ limit: 100 })) {
+          const i = info(d);
+          if (filter?.state && i.state !== filter.state) {
+            continue;
+          }
+          if (
+            filter?.metadata &&
+            !Object.entries(filter.metadata).every(
+              ([k, v]) => i.metadata[k] === v
+            )
+          ) {
+            continue;
+          }
+          if (filter?.limit !== undefined && n >= filter.limit) {
+            return;
+          }
+          n++;
+          yield i;
         }
+      },
+      mapError: mapRunloopError,
+      name: PROVIDER,
+      async verify() {
+        const client = await getClient();
+        await client.devboxes.list({ limit: 1 });
+        return undefined;
       },
     };
     return provider;

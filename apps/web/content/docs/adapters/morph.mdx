@@ -1,10 +1,17 @@
 ---
 title: Morph
 icon: morph
-description: A sandbox per MorphCloud instance. Snapshot-first VMs with instant branching, via the morphcloud SDK.
+description: A sandbox per Morph Cloud instance. Snapshot-first VMs with pause/resume, instant branching and cached setup chains, via the morphcloud SDK.
 ---
 
 <ProviderLinks provider="morph" />
+
+<Callout type="warn" title="Maintenance-only">
+  Morph's TypeScript SDK (`morphcloud`) hasn't been updated since October 2025.
+  Only the Python SDK is still maintained. This adapter is kept correct and
+  working on `morphcloud@0.0.20`, but it won't gain new Morph features. If you
+  are starting fresh on Morph, check the state of the TypeScript SDK first.
+</Callout>
 
 ## Installation
 
@@ -13,6 +20,12 @@ description: A sandbox per MorphCloud instance. Snapshot-first VMs with instant 
 ```package-install
 sbox-sdk morphcloud
 ```
+
+## Authentication
+
+<AuthEnv provider="morph" />
+
+`morph()` reads `MORPH_API_KEY` when you don't pass `apiKey`. Check the key with `client.verify()`. It makes one authenticated list call and never creates anything.
 
 ## Usage
 
@@ -24,49 +37,114 @@ const client = createSandboxClient({
   provider: morph({ apiKey: process.env.MORPH_API_KEY! }),
 });
 
-// `template` is a snapshot id (booted directly) or an image to snapshot first.
-const sandbox = await client.create({ template: "morphvm-minimal" });
-const res = await sandbox.commands.run("uname -a");
-console.log(res.stdout);
+const sandbox = await client.create({
+  template: "morphvm-minimal", // a Morph image id, or a snapshot_… id
+  resources: { vcpus: 2, memoryMB: 4096, diskMB: 16384 },
+  env: { NODE_ENV: "production" },
+  lifecycle: { maxAgeMs: 30 * 60_000, onIdle: "pause", autoResume: true },
+});
 
-// Morph's signature move: branch the live instance into N forks.
-const forks = await sandbox.snapshots!.fork(3);
+for await (const ev of sandbox.commands.run("npm test")) {
+  if (ev.type === "stdout") process.stdout.write(ev.data); // real streaming
+}
+
+await sandbox.pause(); // memory preserved
+await sandbox.resume(); // same id
+
+const [a, b] = await sandbox.fork({ count: 2 }); // instance.branch()
 ```
 
-Morph is **snapshot-first** — there's no boot-from-image, so `create()` either boots a `snapshot…` [`template`](/templates) directly or lazily builds a snapshot from an image (`imageId`, `resources`) and boots that.
+Morph is **snapshot-first**:
 
-<Callout type="info">
-  Exec is the buffered `instance.exec(cmd)` (`streaming` emulated); it has no
-  per-command `cwd`/`env`, so the core folds those into a `cd … && KEY=v …`
-  wrapper (`perCommandEnvCwd: false`). Files are read and written via `exec` +
-  `base64`. Ports are public HTTP services (`exposeHttpService`).
-  `snapshots.create()` is `instance.snapshot()` and `fork()` is
-  `instance.branch()` — both native; in-place `restore` is not supported
-  (branching makes new instances). `destroy()` stops the instance; there is no
-  separate `pause`.
+- `template: "snapshot_…"`, `fromSnapshot`, or a built template boots that snapshot directly.
+- Anything else is a Morph **image id**. The adapter keeps one base snapshot per `(image, vcpus, memory, disk)`, found through a digest and reused on later creates, so creating a sandbox doesn't add a new snapshot each time.
+- `resources` only apply when booting from an image. A snapshot keeps the resources it was taken with.
+
+### How the spec maps
+
+| Spec                                                                    | Morph                                                                                          |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `metadata`, `name`                                                      | instance metadata (`name` is stored as `sbox-name`)                                            |
+| `lifecycle.maxAgeMs`                                                    | `ttlSeconds`                                                                                   |
+| `lifecycle.onIdle`                                                      | `ttlAction`: `pause` → `pause`, `stop`/`destroy` → `stop` (Morph deletes the instance on stop) |
+| `lifecycle.autoResume`                                                  | `setWakeOn(ssh, http)`                                                                         |
+| `env`, inline `secrets`                                                 | added to every command (Morph has no per-instance env)                                         |
+| `ports`                                                                 | exposed as HTTP services at create                                                             |
+| `idempotencyKey`                                                        | stored as metadata. A retry returns the instance that already exists                           |
+| `volumes`, `network` (anything except `allow-all`), GPUs, vault secrets | rejected with `Validation`                                                                     |
+
+`lifecycle.idleTimeoutMs` and `region` have no Morph equivalent, so they're ignored.
+
+## Templates
+
+`client.templates.build()` chains `Snapshot.setup(cmd)`. Morph caches each step by chain hash, so an unchanged prefix of steps is reused. Three sources are accepted:
+
+```ts
+// 1. A Morph image id (or a snapshot id) as the base
+await client.templates!.build({ source: { image: "morphvm-minimal" } });
+
+// 2. A snapshot you already have
+await client.templates!.build({ source: { snapshot: "snapshot_abc" } });
+
+// 3. A restricted Dockerfile: FROM <morph-image-id|snapshot_id> + shell-form RUN only
+const tpl = await client.templates!.build({
+  source: {
+    dockerfile: `FROM morphvm-minimal
+RUN apt-get update && apt-get install -y nodejs
+RUN npm i -g pnpm`,
+  },
+});
+const sandbox = await client.create({ template: tpl });
+```
+
+Every other Dockerfile instruction (`COPY`, `ENV`, `WORKDIR`, `CMD` and so on) is rejected with `Validation`. The same goes for registry images, template `env`, `workdir`, `user`, `startCmd` and `readyCmd`. The result is a snapshot tagged with the template cache key, so `templates.get(cacheKey)` finds it again. Setup output goes to the SDK's own stdout and isn't forwarded to `onEvent`. You only get one `log` event per step.
+
+## Previews
+
+Ports are Morph HTTP services named `sbox-<port>`.
+
+```ts
+const pub = await sandbox.ports!.expose(3000); // auth: { type: "public" }
+const priv = await sandbox.ports!.expose(8080, { visibility: "private" });
+// priv.auth = { type: "header", headers: { Authorization: "Bearer <MORPH_API_KEY>" } }
+```
+
+<Callout type="warn">
+  Morph's private mode (`auth_mode: "api_key"`) checks for your **account API
+  key** in an `Authorization` header. It has no query-token or signed-URL mode,
+  so private previews don't work from a browser (`previewBrowserAuth: false`),
+  and anyone you give the header to holds your full API key. Use public previews
+  for anything that faces a browser.
 </Callout>
-
-## Authentication
-
-<AuthEnv provider="morph" />
-
-## Options
-
-<AutoTypeTable
-  path="../../packages/sbox-sdk/src/morph/index.ts"
-  name="MorphOptions"
-/>
 
 ## Capabilities
 
-| Capability          |    Level    | Notes                              |
-| ------------------- | :---------: | ---------------------------------- |
-| `list`              |   native    |                                    |
-| `snapshot` / `fork` |   native    | `instance.snapshot()` / `branch()` |
-| `streaming`         |  emulated   | `instance.exec` is buffered        |
-| `filesUpload`       |   native    | via `exec` + base64                |
-| `exposePort`        |   native    | `exposeHttpService`                |
-| `codeInterpreter`   | unsupported |                                    |
-| `pause` / `stop`    | unsupported | `destroy()` = stop instance        |
+| Capability                                                                             |    Level    | Notes                                                                       |
+| -------------------------------------------------------------------------------------- | :---------: | --------------------------------------------------------------------------- |
+| `list`                                                                                 |   native    | filtered on the server by metadata                                          |
+| `streaming`                                                                            |   native    | SSE exec with stdout and stderr kept separate                               |
+| `pause`                                                                                |   native    | `instance.pause()` / `resume()`. Memory preserved, id unchanged             |
+| `setTimeout`                                                                           |   native    | `instance.setTTL()`                                                         |
+| `snapshot`                                                                             |   native    | `instance.snapshot()`. The name is stored in metadata. List and delete work |
+| `fork`                                                                                 |   native    | `instance.branch()`. The intermediate snapshot is deleted afterwards        |
+| `ssh`                                                                                  |   native    | `instance.sshKey()` via `ssh.cloud.morph.so`                                |
+| `exposePort`                                                                           |   native    | `exposeHttpService`                                                         |
+| `privatePreview`                                                                       |   native    | header auth with the account API key (see above)                            |
+| `templateBuild`                                                                        |   native    | `Snapshot.setup()` chains                                                   |
+| `filesUpload`                                                                          |  emulated   | exec + base64, in 48 KB chunks so large files round-trip                    |
+| `stop`                                                                                 | unsupported | Morph's stop deletes the instance. Use `pause()` or `destroy()`             |
+| `background`, `pty`, `stdin`, `egressControl`, `volumes`, `metrics`, `codeInterpreter` | unsupported |                                                                             |
 
-`perCommandEnvCwd` is `false` (core wraps); `previewModel` is `subdomain`. In-place snapshot `restore` reports `NotSupported`.
+Flags:
+
+- `perCommandEnvCwd: false`: the core adds `cwd`/`env` to the command itself.
+- `preservesMemoryOnPause: true` and `previewModel: "subdomain"`.
+- No in-place `snapshots.restore()`. To restore, boot a new sandbox with `client.create({ fromSnapshot })`.
+
+## Known limitations
+
+- **`connect()` drops `spec.env`.** Env from `create()` is held by the handle that `create()`/`fork()` return. A sandbox you get back with `client.connect(id)` doesn't have it.
+- **`kill()`** ends the stream right away (exit code 137). It then kills the remote process tree with a second exec that finds processes by a per-command marker env var. A command that clears its own environment can survive this.
+- **`timeoutMs`** is passed to Morph in whole seconds, rounded up. On timeout the adapter also kills the remote process.
+- **File I/O** is exec + base64, so a 5 MB write takes about 100 exec round-trips.
+- `ssh.create()` returns the instance's SSH key with the instance id as the user. The exact gateway username format hasn't been checked against a live account.
