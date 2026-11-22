@@ -62,6 +62,18 @@
       "types": "./dist/memory/index.d.ts",
       "import": "./dist/memory/index.js"
     },
+    "./router": {
+      "types": "./dist/router/index.d.ts",
+      "import": "./dist/router/index.js"
+    },
+    "./cloud": {
+      "types": "./dist/cloud/index.d.ts",
+      "import": "./dist/cloud/index.js"
+    },
+    "./cloud/server": {
+      "types": "./dist/cloud/server.d.ts",
+      "import": "./dist/cloud/server.js"
+    },
     "./agent-tools": {
       "types": "./dist/agent-tools/index.d.ts",
       "import": "./dist/agent-tools/index.js"
