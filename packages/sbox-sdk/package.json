@@ -1,15 +1,23 @@
 {
   "name": "sbox-sdk",
   "version": "0.0.4",
-  "description": "One unified SDK for agent sandbox providers (E2B, Vercel, Cloudflare, Daytona, Modal, and more) — swap the adapter import, keep your code.",
+  "description": "One unified SDK for agent sandbox providers (E2B, Vercel, Daytona, Modal, Fly Sprites, Tensorlake, Superserve, Freestyle, Docker and more) — swap the adapter import, keep your code.",
   "keywords": [
     "agent",
     "ai",
     "cloudflare-sandbox",
     "code-interpreter",
     "daytona",
+    "docker",
     "e2b",
+    "firecracker",
+    "fly-sprites",
+    "freestyle",
+    "microvm",
     "sandbox",
+    "superserve",
+    "tensorlake",
+    "together-sandbox",
     "vercel-sandbox"
   ],
   "homepage": "https://sbox-sdk.vercel.app",
@@ -137,6 +145,30 @@
     "./railway": {
       "types": "./dist/railway/index.d.ts",
       "import": "./dist/railway/index.js"
+    },
+    "./superserve": {
+      "types": "./dist/superserve/index.d.ts",
+      "import": "./dist/superserve/index.js"
+    },
+    "./tensorlake": {
+      "types": "./dist/tensorlake/index.d.ts",
+      "import": "./dist/tensorlake/index.js"
+    },
+    "./sprites": {
+      "types": "./dist/sprites/index.d.ts",
+      "import": "./dist/sprites/index.js"
+    },
+    "./freestyle": {
+      "types": "./dist/freestyle/index.d.ts",
+      "import": "./dist/freestyle/index.js"
+    },
+    "./together": {
+      "types": "./dist/together/index.d.ts",
+      "import": "./dist/together/index.js"
+    },
+    "./docker": {
+      "types": "./dist/docker/index.d.ts",
+      "import": "./dist/docker/index.js"
     }
   },
   "scripts": {
@@ -151,53 +183,67 @@
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.69.0",
     "@aws-sdk/client-lambda": "^3.1075.0",
-    "@aws-sdk/client-lambda-microvms": "^3.1075.0",
+    "@aws-sdk/client-lambda-microvms": "^3.1175.0",
     "@aws-sdk/client-s3": "^3.1075.0",
-    "@beamcloud/beam-js": "*",
-    "@blaxel/core": "*",
-    "@cloudflare/sandbox": "^0.12.1",
+    "@beamcloud/beam-js": "^1.1.6",
+    "@blaxel/core": "^0.3.40",
+    "@cloudflare/sandbox": "^0.12.14",
     "@codesandbox/sdk": "*",
-    "@daytonaio/sdk": "^0.191.0",
-    "@e2b/code-interpreter": "^2.6.1",
+    "@daytona/sdk": "^2.1.0",
+    "@e2b/code-interpreter": "^2.9.1",
+    "@fly/sprites": "^0.2.5",
     "@langchain/core": "^0.3.0",
     "@mastra/core": "^1.46.0",
-    "@northflank/js-client": "*",
+    "@northflank/js-client": "^0.13.0",
     "@openai/agents": "^0.12.0",
     "@runloop/api-client": "*",
     "@sbox-sdk/config": "workspace:*",
+    "@superserve/sdk": "^0.13.0",
     "@types/node": "^25.9.1",
     "@typescript/native-preview": "7.0.0-dev.20260624.1",
-    "@vercel/sandbox": "^2.2.1",
+    "@vercel/sandbox": "^4.1.0",
     "ai": "^5.0.0",
-    "modal": "^0.8.1",
+    "e2b": "^2.64.0",
+    "freestyle": "^0.2.23",
+    "modal": "^0.11.2",
     "morphcloud": "*",
-    "railway": "*",
+    "railway": "^3.17.0",
+    "tensorlake": "^0.5.165",
+    "together-sandbox": "^4.1.1",
     "typescript": "5.9.2",
     "vitest": "^3.2.4",
     "zod": "^4.0.0"
   },
   "peerDependencies": {
     "@anthropic-ai/sdk": ">=0.40.0",
-    "@aws-sdk/client-lambda-microvms": "*",
-    "@beamcloud/beam-js": "*",
-    "@blaxel/core": "*",
-    "@cloudflare/sandbox": "*",
-    "@codesandbox/sdk": "*",
-    "@daytonaio/sdk": "*",
-    "@e2b/code-interpreter": "*",
+    "@aws-sdk/client-lambda-microvms": ">=3.1100.0",
+    "@beamcloud/beam-js": ">=1.1.0",
+    "@blaxel/core": ">=0.3.0",
+    "@cloudflare/sandbox": "~0.12.14",
+    "@codesandbox/sdk": "^2.4.0",
+    "@daytona/sdk": ">=2.0.0",
+    "@e2b/code-interpreter": ">=2.9.0",
+    "@fly/sprites": ">=0.2.5",
     "@langchain/core": ">=0.3.0",
     "@mastra/core": "^1.0.0",
-    "@northflank/js-client": "*",
+    "@northflank/js-client": ">=0.13.0",
     "@openai/agents": ">=0.12.0",
-    "@runloop/api-client": "*",
-    "@vercel/sandbox": "*",
+    "@runloop/api-client": ">=1.24.0",
+    "@superserve/sdk": ">=0.13.0",
+    "@vercel/sandbox": ">=4.0.0",
     "ai": "^5.0.0 || ^6.0.0",
-    "modal": "*",
-    "morphcloud": "*",
-    "railway": "*",
+    "freestyle": ">=0.2.20",
+    "modal": ">=0.11.0",
+    "morphcloud": ">=0.0.20",
+    "railway": ">=3.4.0",
+    "tensorlake": ">=0.5.0",
+    "together-sandbox": ">=4.0.0",
     "zod": "^3.25.0 || ^4.0.0"
   },
   "peerDependenciesMeta": {
+    "@anthropic-ai/sdk": {
+      "optional": true
+    },
     "@aws-sdk/client-lambda-microvms": {
       "optional": true
     },
@@ -213,10 +259,43 @@
     "@codesandbox/sdk": {
       "optional": true
     },
+    "@daytona/sdk": {
+      "optional": true
+    },
+    "@e2b/code-interpreter": {
+      "optional": true
+    },
+    "@fly/sprites": {
+      "optional": true
+    },
+    "@langchain/core": {
+      "optional": true
+    },
+    "@mastra/core": {
+      "optional": true
+    },
     "@northflank/js-client": {
       "optional": true
     },
+    "@openai/agents": {
+      "optional": true
+    },
     "@runloop/api-client": {
+      "optional": true
+    },
+    "@superserve/sdk": {
+      "optional": true
+    },
+    "@vercel/sandbox": {
+      "optional": true
+    },
+    "ai": {
+      "optional": true
+    },
+    "freestyle": {
+      "optional": true
+    },
+    "modal": {
       "optional": true
     },
     "morphcloud": {
@@ -225,34 +304,13 @@
     "railway": {
       "optional": true
     },
-    "@daytonaio/sdk": {
+    "tensorlake": {
       "optional": true
     },
-    "@e2b/code-interpreter": {
-      "optional": true
-    },
-    "modal": {
-      "optional": true
-    },
-    "@vercel/sandbox": {
+    "together-sandbox": {
       "optional": true
     },
     "zod": {
-      "optional": true
-    },
-    "ai": {
-      "optional": true
-    },
-    "@mastra/core": {
-      "optional": true
-    },
-    "@openai/agents": {
-      "optional": true
-    },
-    "@anthropic-ai/sdk": {
-      "optional": true
-    },
-    "@langchain/core": {
       "optional": true
     }
   },

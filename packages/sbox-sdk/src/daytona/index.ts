@@ -1,4 +1,4 @@
-import type { Daytona, Sandbox as DaytonaSandbox } from "@daytonaio/sdk";
+import type { Daytona, Sandbox as DaytonaSandbox } from "@daytona/sdk/v0";
 
 /**
  * `sbox-sdk/daytona` — adapter for `@daytonaio/sdk`. A full-featured sandbox:
@@ -73,11 +73,11 @@ const DAYTONA_FLAGS: CapabilityFlags = {
   previewModel: "subdomain",
 };
 
-type DaytonaModule = typeof import("@daytonaio/sdk");
+type DaytonaModule = typeof import("@daytona/sdk/v0");
 let cached: DaytonaModule | null = null;
 async function loadDaytona(): Promise<DaytonaModule> {
   if (!cached) {
-    cached = (await import("@daytonaio/sdk")) as unknown as DaytonaModule;
+    cached = (await import("@daytona/sdk/v0")) as unknown as DaytonaModule;
   }
   return cached;
 }
